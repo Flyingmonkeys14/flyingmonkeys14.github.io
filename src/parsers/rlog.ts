@@ -1,13 +1,12 @@
 /**
  * RLOG binary format parser (AdvantageKit legacy format).
- * Each packet: 4-byte timestamp (ms) | 2-byte key len | key bytes | 1-byte type | value bytes
- * Types: 0=null, 1=boolean, 2=byte, 3=int, 4=float, 5=double, 6=string,
- *        7=boolean[], 8=byte[], 9=int[], 10=float[], 11=double[], 12=string[]
  */
 
 import type { LogField, LogValue } from "../types";
 import { buildParsedLog } from "./logUtils";
 import type { ParsedLog } from "../types";
+
+type ProgressCallback = (progress: number) => void;
 
 const TYPE_MAP: Record<number, LogField["type"]> = {
   0: "Empty",
@@ -87,13 +86,26 @@ function decodeRlogValue(typeId: number, view: DataView, bytes: Uint8Array, offs
   }
 }
 
-export function parseRLOG(buffer: ArrayBuffer, filename: string): ParsedLog {
+export async function parseRLOG(
+  buffer: ArrayBuffer,
+  filename: string,
+  onProgress?: ProgressCallback
+): Promise<ParsedLog> {
   const bytes = new Uint8Array(buffer);
   const view = new DataView(buffer);
+  const totalBytes = bytes.length;
   const fields: Record<string, LogField> = {};
 
   let pos = 0;
+  let lastYield = Date.now();
+
   while (pos + 4 <= bytes.length) {
+    if (onProgress && Date.now() - lastYield > 40) {
+      onProgress(pos / totalBytes);
+      await new Promise<void>((r) => setTimeout(r, 0));
+      lastYield = Date.now();
+    }
+
     const timestampMs = view.getUint32(pos, false);
     pos += 4;
 
@@ -109,7 +121,6 @@ export function parseRLOG(buffer: ArrayBuffer, filename: string): ParsedLog {
     const typeId = view.getUint8(pos);
     pos++;
 
-    // Value length: 2-byte prefix
     if (pos + 2 > bytes.length) break;
     const valueLen = view.getUint16(pos, false);
     pos += 2;
@@ -143,5 +154,6 @@ export function parseRLOG(buffer: ArrayBuffer, filename: string): ParsedLog {
     throw new Error("No fields found in RLOG file");
   }
 
+  onProgress?.(1);
   return buildParsedLog(fields, "RLOG", filename);
 }

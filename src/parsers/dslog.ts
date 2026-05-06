@@ -1,17 +1,20 @@
 /**
  * Driver Station Log (.dslog) parser.
- * The .dslog binary format logs robot state at ~50 Hz:
- *   Header: 4-byte version + 4-byte start time (Unix seconds)
- *   Records (17 bytes each at v3):
- *     packet_ms (u32) | lost_packets (u8) | voltage (u8, /256*13) |
- *     status byte | trip_time (u8) | brownout (u8) | user_ds_data (u8) | ...
  */
 
 import type { LogField } from "../types";
 import { buildParsedLog } from "./logUtils";
 import type { ParsedLog } from "../types";
 
-function addEntry(fields: Record<string, LogField>, key: string, typeStr: string, ts: number, value: number | boolean) {
+type ProgressCallback = (progress: number) => void;
+
+function addEntry(
+  fields: Record<string, LogField>,
+  key: string,
+  typeStr: string,
+  ts: number,
+  value: number | boolean
+) {
   if (!fields[key]) {
     fields[key] = {
       key,
@@ -23,9 +26,14 @@ function addEntry(fields: Record<string, LogField>, key: string, typeStr: string
   fields[key].entries.push({ timestamp: ts, value });
 }
 
-export function parseDSLog(buffer: ArrayBuffer, filename: string): ParsedLog {
+export async function parseDSLog(
+  buffer: ArrayBuffer,
+  filename: string,
+  onProgress?: ProgressCallback
+): Promise<ParsedLog> {
   const view = new DataView(buffer);
   const bytes = new Uint8Array(buffer);
+  const totalBytes = bytes.length;
 
   if (bytes.length < 8) throw new Error("DSLog file too short");
 
@@ -39,8 +47,15 @@ export function parseDSLog(buffer: ArrayBuffer, filename: string): ParsedLog {
   const fields: Record<string, LogField> = {};
   const RECORD_SIZE = 17;
   let pos = 8;
+  let lastYield = Date.now();
 
   while (pos + RECORD_SIZE <= bytes.length) {
+    if (onProgress && Date.now() - lastYield > 40) {
+      onProgress(pos / totalBytes);
+      await new Promise<void>((r) => setTimeout(r, 0));
+      lastYield = Date.now();
+    }
+
     const packetMs = view.getUint32(pos, false);
     const lostPackets = view.getUint8(pos + 4);
     const voltageRaw = view.getUint8(pos + 5);
@@ -67,5 +82,6 @@ export function parseDSLog(buffer: ArrayBuffer, filename: string): ParsedLog {
     throw new Error("No data found in DSLog file");
   }
 
+  onProgress?.(1);
   return buildParsedLog(fields, "DS Log", filename);
 }

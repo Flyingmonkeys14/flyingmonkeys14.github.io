@@ -1,11 +1,6 @@
 /**
  * WPILOG binary format parser.
  * Spec: https://github.com/wpilibsuite/allwpilib/blob/main/wpiutil/doc/datalog.adoc
- *
- * File structure:
- *   Header: "WPILOG\0" + version (u16 LE) + extra header len (u32 LE) + extra header bytes
- *   Records: [bit-packed header][data bytes]
- *     Header bits: entry_id_len(2) | size_len(2) | timestamp_len(3) | has_entry(1)
  */
 
 import type { LogField, LogValue } from "../types";
@@ -14,6 +9,8 @@ import type { ParsedLog } from "../types";
 
 const WPILOG_MAGIC = "WPILOG\0";
 const CONTROL_ENTRY_ID = 0;
+
+type ProgressCallback = (progress: number) => void;
 
 interface EntryInfo {
   name: string;
@@ -33,7 +30,7 @@ function decodeString(buf: Uint8Array, offset: number, len: number): string {
   return new TextDecoder().decode(buf.subarray(offset, offset + len));
 }
 
-function typeStrToLoggable(typeStr: string): LogField["type"] {
+export function typeStrToLoggable(typeStr: string): LogField["type"] {
   const t = typeStr.toLowerCase();
   if (t === "boolean") return "Boolean";
   if (t === "int64" || t === "float" || t === "double" || t === "int" || t === "integer") return "Number";
@@ -93,7 +90,6 @@ function decodeValue(
     return arr;
   }
   if (t === "string[]") {
-    // Packed string array: each element prefixed by u32 length
     const arr: string[] = [];
     let pos = 0;
     while (pos + 4 <= length) {
@@ -106,15 +102,18 @@ function decodeValue(
     return arr;
   }
 
-  // Raw / struct / proto — return as byte array
   return data.slice(offset, offset + length);
 }
 
-export function parseWPILOG(buffer: ArrayBuffer, filename: string): ParsedLog {
+export async function parseWPILOG(
+  buffer: ArrayBuffer,
+  filename: string,
+  onProgress?: ProgressCallback
+): Promise<ParsedLog> {
   const bytes = new Uint8Array(buffer);
   const view = new DataView(buffer);
+  const totalBytes = bytes.length;
 
-  // Validate magic
   const magic = new TextDecoder().decode(bytes.subarray(0, 7));
   if (magic !== WPILOG_MAGIC) {
     throw new Error("Not a valid WPILOG file (bad magic bytes)");
@@ -131,7 +130,16 @@ export function parseWPILOG(buffer: ArrayBuffer, filename: string): ParsedLog {
   const entryMap = new Map<number, EntryInfo>();
   const fields: Record<string, LogField> = {};
 
+  let lastYield = Date.now();
+
   while (pos < bytes.length) {
+    // Yield to UI thread every 40ms to allow progress updates
+    if (onProgress && Date.now() - lastYield > 40) {
+      onProgress(pos / totalBytes);
+      await new Promise<void>((r) => setTimeout(r, 0));
+      lastYield = Date.now();
+    }
+
     if (pos + 1 > bytes.length) break;
 
     const bitfield = view.getUint8(pos);
@@ -153,10 +161,8 @@ export function parseWPILOG(buffer: ArrayBuffer, filename: string): ParsedLog {
     if (pos + dataSize > bytes.length) break;
 
     if (entryId === CONTROL_ENTRY_ID) {
-      // Control record
       const controlType = view.getUint8(pos);
       if (controlType === 0) {
-        // Start record: entry_id (u32) | name_len (u32) | name | type_len (u32) | type | metadata_len (u32) | metadata
         let cpos = pos + 1;
         if (cpos + 4 > pos + dataSize) { pos += dataSize; continue; }
         const newEntryId = view.getUint32(cpos, true);
@@ -187,9 +193,7 @@ export function parseWPILOG(buffer: ArrayBuffer, filename: string): ParsedLog {
           };
         }
       }
-      // Finish (1) and Set Metadata (2) records are intentionally skipped
     } else {
-      // Data record
       const info = entryMap.get(entryId);
       if (info) {
         const field = fields[info.name];
@@ -210,5 +214,6 @@ export function parseWPILOG(buffer: ArrayBuffer, filename: string): ParsedLog {
     pos += dataSize;
   }
 
+  onProgress?.(1);
   return buildParsedLog(fields, "WPILOG", filename);
 }
