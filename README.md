@@ -1,11 +1,26 @@
 # Online AdvantageScope
 
-A browser-based log file viewer for FRC (FIRST Robotics Competition) log formats, built as a GitHub Pages web app. No installation required — just open the page and drop in a log file.
+A browser-based log file viewer for FRC (FIRST Robotics Competition) log formats, deployed as a password-protected GitHub Pages web app. No installation required.
+
+## Adding Log Files
+
+1. Place log files in `public/logs/`
+2. Update `public/logs/manifest.json` to list the filenames:
+
+```json
+[
+  "match1.wpilog",
+  "match2.hoot",
+  "autonomous.csv"
+]
+```
+
+3. Commit and push — the site will automatically parse and display all listed files on load.
 
 ## Supported Formats
 
-| Format | Extension | Description |
-|--------|-----------|-------------|
+| Format | Extension(s) | Description |
+|--------|-------------|-------------|
 | **WPILOG** | `.wpilog` | WPILib standard data log (AdvantageKit, etc.) |
 | **HOOT** | `.hoot` | CTRE Phoenix 6 robot log |
 | **REVLOG** | `.revlog` | REV Robotics data log |
@@ -15,28 +30,30 @@ A browser-based log file viewer for FRC (FIRST Robotics Competition) log formats
 
 ## Features
 
+- **Password gate** — SHA-256-protected splash screen; password never stored in plain text
 - **Field tree** — Browse all logged fields in a hierarchical sidebar
+- **Log selector** — Switch between multiple log files without reloading
 - **Time-series chart** — Plot multiple numeric/boolean fields on a shared timeline
-- **Value table** — See current values of all selected fields at any point in time
-- **Time slider** — Scrub through the log; click the chart to jump to a timestamp
-- **Fully client-side** — Files never leave your browser
+- **Value table** — See field values at any point in time
+- **Time slider** — Scrub through the log; click the chart to seek
+- **Fully client-side** — Files are served statically; nothing is uploaded
 
 ## Development
 
 ```bash
 npm install
-npm run dev       # start dev server
-npm run build     # production build → dist/
+npm run dev     # dev server at http://localhost:5173
+npm run build   # production build → dist/
 ```
 
-## Deployment
+## Deployment (GitHub Pages)
 
-Push to `main` — the GitHub Actions workflow (`deploy.yml`) automatically builds and deploys to GitHub Pages.
+Push to `main` — `.github/workflows/deploy.yml` builds and deploys automatically.
 
-To enable GitHub Pages:
+To enable GitHub Pages the first time:
 1. Go to **Settings → Pages**
 2. Set Source to **GitHub Actions**
 
 ## Credits
 
-Inspired by [AdvantageScope](https://github.com/Mechanical-Advantage/AdvantageScope) by Mechanical Advantage (FRC Team 6328). Log format specifications from the WPILib and CTRE documentation.
+Inspired by [AdvantageScope](https://github.com/Mechanical-Advantage/AdvantageScope) by Mechanical Advantage (FRC Team 6328).

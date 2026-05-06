@@ -29,6 +29,88 @@ body {
   font-size: 13px;
 }
 
+/* ===== Password Gate ===== */
+.auth-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.auth-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 40px 48px;
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  box-shadow: 0 24px 48px #00000066;
+}
+
+.auth-logo { font-size: 48px; }
+
+.auth-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.auth-sub {
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: center;
+  margin-bottom: 4px;
+}
+
+.auth-form {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.auth-input {
+  width: 100%;
+  padding: 10px 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.auth-input:focus { border-color: var(--accent); }
+.auth-input.error { border-color: var(--error); }
+
+.auth-error {
+  color: var(--error);
+  font-size: 12px;
+  text-align: center;
+}
+
+.auth-btn {
+  width: 100%;
+  padding: 10px;
+  background: var(--accent);
+  border: none;
+  border-radius: 8px;
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.auth-btn:hover:not(:disabled) { background: var(--accent-hover); }
+.auth-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
 /* ===== App Layout ===== */
 .app {
   display: flex;
@@ -80,78 +162,6 @@ body {
   max-width: 500px;
 }
 
-/* ===== Buttons ===== */
-.btn-secondary {
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  color: var(--text);
-  padding: 5px 12px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 12px;
-  white-space: nowrap;
-  transition: background 0.15s;
-}
-.btn-secondary:hover { background: var(--border); }
-
-/* ===== Main center (drop zone state) ===== */
-.main-center {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-  padding: 24px;
-}
-
-/* ===== Drop Zone ===== */
-.dropzone {
-  border: 2px dashed var(--border);
-  border-radius: 16px;
-  padding: 48px 64px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
-  max-width: 500px;
-  width: 100%;
-  text-align: center;
-}
-.dropzone:hover, .dropzone.drag-over {
-  border-color: var(--accent);
-  background: #1e40af11;
-}
-.dropzone-icon { font-size: 48px; }
-.dropzone-title { font-size: 18px; font-weight: 600; }
-.dropzone-sub { color: var(--text-muted); }
-.dropzone-formats { color: var(--text-muted); font-size: 11px; margin-top: 4px; }
-.dropzone.loading { cursor: default; pointer-events: none; }
-
-.spinner {
-  width: 36px; height: 36px;
-  border: 3px solid var(--border);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
-
-/* ===== Error ===== */
-.error-box {
-  background: #7f1d1d44;
-  border: 1px solid var(--error);
-  color: var(--error);
-  padding: 12px 16px;
-  border-radius: 8px;
-  max-width: 500px;
-  width: 100%;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
 /* ===== Workspace Layout ===== */
 .workspace {
   flex: 1;
@@ -175,11 +185,135 @@ body {
   overflow: hidden;
 }
 
+/* ===== Log Selector ===== */
+.sidebar-section-label {
+  padding: 8px 12px 4px;
+  font-weight: 600;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  flex-shrink: 0;
+}
+
+.log-selector {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 4px;
+  flex-shrink: 0;
+}
+
+.log-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 12px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+  transition: background 0.1s, color 0.1s;
+}
+.log-tab:hover { background: var(--surface2); color: var(--text); }
+.log-tab.active { background: #1e40af33; color: #93c5fd; }
+.log-tab.has-error { color: var(--error); }
+
+.log-tab-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-tab-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+.log-tab-badge.loading { background: var(--border); color: var(--text-muted); }
+.log-tab-badge.error { background: var(--error); color: #fff; }
+
+/* ===== Sidebar Status ===== */
+.sidebar-status {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.sidebar-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.sidebar-error {
+  color: var(--error);
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.spinner {
+  width: 28px; height: 28px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ===== Main Empty ===== */
+.main-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+}
+
+.empty-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+}
+
+.empty-icon { font-size: 48px; }
+
+.empty-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.empty-sub {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.empty-sub code {
+  background: var(--surface2);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: monospace;
+}
+
 /* ===== Field Tree ===== */
 .field-tree {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1;
   overflow: hidden;
 }
 
@@ -189,7 +323,7 @@ body {
   justify-content: space-between;
   padding: 8px 12px 4px;
   font-weight: 600;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
