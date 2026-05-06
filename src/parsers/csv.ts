@@ -8,6 +8,8 @@ import type { LogField, LogValue } from "../types";
 import { buildParsedLog } from "./logUtils";
 import type { ParsedLog } from "../types";
 
+type ProgressCallback = (progress: number) => void;
+
 function inferType(values: string[]): LogField["type"] {
   const sample = values.filter(Boolean).slice(0, 20);
   if (sample.every((v) => v === "true" || v === "false")) return "Boolean";
@@ -25,7 +27,6 @@ function parseValue(raw: string, type: LogField["type"]): LogValue {
     return isNaN(n) ? null : n;
   }
 
-  // Array detection: [val1, val2, ...] or val1;val2;...
   if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
     const inner = trimmed.slice(1, -1);
     const parts = inner.split(/[,;]/).map((s) => s.trim());
@@ -58,14 +59,19 @@ function splitCSVLine(line: string): string[] {
   return result;
 }
 
-export function parseCSV(text: string, filename: string): ParsedLog {
+const YIELD_EVERY = 500; // lines
+
+export async function parseCSV(
+  text: string,
+  filename: string,
+  onProgress?: ProgressCallback
+): Promise<ParsedLog> {
   const lines = text.split(/\r?\n/).filter((l) => l.trim());
   if (lines.length < 2) throw new Error("CSV file is too short");
 
   const header = splitCSVLine(lines[0]);
   const fields: Record<string, LogField> = {};
 
-  // Detect format by checking if second column looks like a key
   const firstData = splitCSVLine(lines[1]);
   const isThreeCol =
     header.length === 3 &&
@@ -79,8 +85,6 @@ export function parseCSV(text: string, filename: string): ParsedLog {
     isNaN(Number(firstData[1]));
 
   if (isThreeCol || isKeyValueFormat) {
-    // Three-column: Timestamp, Key, Value
-    // First pass to collect all values per key for type inference
     const rawValues: Record<string, string[]> = {};
     for (let i = 1; i < lines.length; i++) {
       const cols = splitCSVLine(lines[i]);
@@ -100,6 +104,10 @@ export function parseCSV(text: string, filename: string): ParsedLog {
     }
 
     for (let i = 1; i < lines.length; i++) {
+      if (i % YIELD_EVERY === 0 && onProgress) {
+        onProgress(i / lines.length);
+        await new Promise<void>((r) => setTimeout(r, 0));
+      }
       const cols = splitCSVLine(lines[i]);
       if (cols.length < 3) continue;
       const ts = Number(cols[0].trim());
@@ -113,7 +121,6 @@ export function parseCSV(text: string, filename: string): ParsedLog {
       }
     }
   } else {
-    // Multi-column: first col = timestamp, rest = fields
     const keys = header.slice(1).map((h) => h.trim());
     const rawValues: Record<string, string[]> = {};
     for (const k of keys) rawValues[k] = [];
@@ -135,6 +142,10 @@ export function parseCSV(text: string, filename: string): ParsedLog {
     }
 
     for (let i = 1; i < lines.length; i++) {
+      if (i % YIELD_EVERY === 0 && onProgress) {
+        onProgress(i / lines.length);
+        await new Promise<void>((r) => setTimeout(r, 0));
+      }
       const cols = splitCSVLine(lines[i]);
       const ts = Number(cols[0]?.trim());
       if (isNaN(ts)) continue;
@@ -153,5 +164,6 @@ export function parseCSV(text: string, filename: string): ParsedLog {
     throw new Error("No fields found in CSV file");
   }
 
+  onProgress?.(1);
   return buildParsedLog(fields, "CSV", filename);
 }

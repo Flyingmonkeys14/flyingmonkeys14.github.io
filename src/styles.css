@@ -111,6 +111,36 @@ body {
 .auth-btn:hover:not(:disabled) { background: var(--accent-hover); }
 .auth-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
+/* ===== Topbar Buttons ===== */
+.btn-upload {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 5px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+.btn-upload:hover { background: var(--border); }
+
+.btn-export {
+  background: #14532d;
+  border: 1px solid #166534;
+  color: #4ade80;
+  padding: 5px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+  font-weight: 600;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+.btn-export:hover { background: #166534; }
+
 /* ===== App Layout ===== */
 .app {
   display: flex;
@@ -215,6 +245,8 @@ body {
   font-size: 12px;
   text-align: left;
   transition: background 0.1s, color 0.1s;
+  position: relative;
+  overflow: hidden;
 }
 .log-tab:hover { background: var(--surface2); color: var(--text); }
 .log-tab.active { background: #1e40af33; color: #93c5fd; }
@@ -227,6 +259,16 @@ body {
   white-space: nowrap;
 }
 
+.log-tab-status {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: monospace;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
 .log-tab-badge {
   font-size: 10px;
   font-weight: 700;
@@ -234,8 +276,21 @@ body {
   border-radius: 8px;
   flex-shrink: 0;
 }
-.log-tab-badge.loading { background: var(--border); color: var(--text-muted); }
 .log-tab-badge.error { background: var(--error); color: #fff; }
+
+/* Progress bar rendered as an absolute strip at bottom of the tab row */
+.log-tab-progress {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 0 1px 1px 0;
+  transition: width 0.15s linear;
+  pointer-events: none;
+}
+
+.eta { color: var(--warning); }
 
 /* ===== Sidebar Status ===== */
 .sidebar-status {
@@ -253,6 +308,13 @@ body {
   gap: 10px;
   color: var(--text-muted);
   font-size: 12px;
+  text-align: center;
+}
+
+.progress-text {
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--text-muted);
 }
 
 .sidebar-error {
@@ -307,6 +369,47 @@ body {
   padding: 1px 5px;
   border-radius: 4px;
   font-family: monospace;
+}
+
+/* ===== Drop Hint (sidebar empty state) ===== */
+.drop-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 8px;
+}
+.drop-hint-icon { font-size: 32px; }
+.drop-hint-sub { opacity: 0.7; }
+.drop-hint-error {
+  color: var(--error);
+  font-size: 11px;
+  margin-top: 4px;
+  max-width: 220px;
+  word-break: break-word;
+}
+
+/* ===== Main drop zone (shown when no log is active) ===== */
+.dropzone-main {
+  border: 2px dashed var(--border);
+  border-radius: 16px;
+  padding: 48px 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  max-width: 480px;
+  width: 100%;
+  text-align: center;
+}
+.dropzone-main:hover {
+  border-color: var(--accent);
+  background: #1e40af11;
 }
 
 /* ===== Field Tree ===== */
