@@ -1,13 +1,16 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import type { ParsedLog } from "./types";
+import type { ParsedLog, LogField } from "./types";
 import { parseLogFile } from "./parsers/index";
 import { downloadWPILOG } from "./parsers/wpilogWriter";
+import { buildFieldTree } from "./parsers/logUtils";
 import { PasswordGate, isAuthenticated } from "./components/PasswordGate";
 import { FieldTree } from "./components/FieldTree";
 import { TimeChart, ValueTable } from "./components/TimeChart";
 import { TimeSlider } from "./components/TimeSlider";
+import { StatsTable } from "./components/StatsTable";
+import { CalculatedFields } from "./components/CalculatedFields";
 
-type Tab = "chart" | "table";
+type Tab = "chart" | "table" | "stats";
 
 interface LogEntry {
   filename: string;
@@ -44,6 +47,7 @@ export default function App() {
   const [currentTime, setCurrentTime] = useState(0);
   const [tab, setTab] = useState<Tab>("chart");
   const [manifestError, setManifestError] = useState<string | null>(null);
+  const [showCalc, setShowCalc] = useState(false);
   const uploadInputRef = useRef<HTMLInputElement>(null);
 
   const [, setTick] = useState(0);
@@ -182,6 +186,7 @@ export default function App() {
     (filename: string) => {
       setActiveLog(filename);
       setSelectedFields(new Set());
+      setShowCalc(false);
       const entry = logs.find((e) => e.filename === filename);
       if (entry?.log) setCurrentTime(entry.log.startTime);
     },
@@ -206,6 +211,21 @@ export default function App() {
     downloadWPILOG(log, Array.from(selectedFields));
   }, [log, selectedFields]);
 
+  const handleAddCalculatedField = useCallback((field: LogField) => {
+    setLogs((prev) =>
+      prev.map((entry) => {
+        if (entry.filename !== activeLog || !entry.log) return entry;
+        const newFields = { ...entry.log.fields, [field.key]: field };
+        const updatedLog: ParsedLog = {
+          ...entry.log,
+          fields: newFields,
+          fieldTree: buildFieldTree(newFields),
+        };
+        return { ...entry, log: updatedLog };
+      })
+    );
+  }, [activeLog]);
+
   if (!authed) {
     return <PasswordGate onAuth={() => setAuthed(true)} />;
   }
@@ -214,22 +234,33 @@ export default function App() {
     <div className="app" onDragOver={handleDragOver} onDrop={handleDrop}>
       <header className="topbar">
         <div className="topbar-left">
-          <span className="logo">📊</span>
+          <img src="/logo.svg" alt="469 Las Guerrillas" className="team-logo" />
           <span className="title">Online AdvantageScope</span>
+          <span className="team-badge">Team 469</span>
         </div>
 
         <div className="topbar-right">
           {log && (
             <span className="file-info">
-              {log.filename} · {log.format} ·{" "}
-              {Object.keys(log.fields).length} fields ·{" "}
+              {log.filename} &middot; {log.format} &middot;{" "}
+              {Object.keys(log.fields).length} fields &middot;{" "}
               {(log.endTime - log.startTime).toFixed(2)}s
             </span>
           )}
 
+          {log && (
+            <button
+              className={`btn-calc ${showCalc ? "active" : ""}`}
+              onClick={() => setShowCalc((v) => !v)}
+              title="Create calculated fields from existing data"
+            >
+              &fnof; Calc
+            </button>
+          )}
+
           {selectedFields.size > 0 && log && (
             <button className="btn-export" onClick={handleExport} title="Save selected fields as a new WPILOG file">
-              ⬇ Export {selectedFields.size} field{selectedFields.size !== 1 ? "s" : ""} as WPILOG
+              &darr; Export {selectedFields.size} field{selectedFields.size !== 1 ? "s" : ""} as WPILOG
             </button>
           )}
 
@@ -238,7 +269,7 @@ export default function App() {
             onClick={() => uploadInputRef.current?.click()}
             title="Open a log file from your computer"
           >
-            📂 Open file…
+            &#128194; Open file&hellip;
           </button>
           <input
             ref={uploadInputRef}
@@ -295,9 +326,9 @@ export default function App() {
           {logs.length === 0 && (
             <div className="sidebar-status">
               <div className="drop-hint">
-                <div className="drop-hint-icon">📂</div>
+                <div className="drop-hint-icon">&#128194;</div>
                 <p>Drop a log file anywhere</p>
-                <p className="drop-hint-sub">or use "Open file…" above</p>
+                <p className="drop-hint-sub">or use &ldquo;Open file&hellip;&rdquo; above</p>
                 {manifestError && (
                   <p className="drop-hint-error">{manifestError}</p>
                 )}
@@ -315,11 +346,11 @@ export default function App() {
             <div className="sidebar-status">
               <div className="sidebar-loading">
                 <div className="spinner" />
-                <p>Parsing {activeEntry.filename}…</p>
+                <p>Parsing {activeEntry.filename}&hellip;</p>
                 <p className="progress-text">
                   {Math.round(activeEntry.progress * 100)}%
                   {formatEta(activeEntry) && (
-                    <span className="eta"> · ETA {formatEta(activeEntry)}</span>
+                    <span className="eta"> &middot; ETA {formatEta(activeEntry)}</span>
                   )}
                 </p>
               </div>
@@ -361,34 +392,46 @@ export default function App() {
                 >
                   Values
                 </button>
+                <button
+                  className={`tab ${tab === "stats" ? "active" : ""}`}
+                  onClick={() => setTab("stats")}
+                >
+                  Stats
+                </button>
                 {selectedFields.size === 0 && (
-                  <span className="tab-hint">← Select fields from the sidebar</span>
+                  <span className="tab-hint">&larr; Select fields from the sidebar</span>
                 )}
               </div>
 
               <div className="main-view">
-                {tab === "chart" ? (
+                {showCalc ? (
+                  <CalculatedFields log={log} onAddField={handleAddCalculatedField} />
+                ) : tab === "chart" ? (
                   <TimeChart
                     log={log}
                     selectedFields={selectedFields}
                     currentTime={currentTime}
                     onTimeChange={setCurrentTime}
                   />
-                ) : (
+                ) : tab === "table" ? (
                   <ValueTable
                     log={log}
                     selectedFields={selectedFields}
                     currentTime={currentTime}
                   />
+                ) : (
+                  <StatsTable log={log} selectedFields={selectedFields} />
                 )}
               </div>
 
-              <TimeSlider
-                startTime={log.startTime}
-                endTime={log.endTime}
-                currentTime={currentTime}
-                onTimeChange={setCurrentTime}
-              />
+              {!showCalc && (
+                <TimeSlider
+                  startTime={log.startTime}
+                  endTime={log.endTime}
+                  currentTime={currentTime}
+                  onTimeChange={setCurrentTime}
+                />
+              )}
             </>
           ) : (
             <div className="main-empty">
@@ -398,10 +441,10 @@ export default function App() {
                 onDragOver={handleDragOver}
                 onDrop={handleDrop}
               >
-                <div className="empty-icon">📂</div>
+                <img src="/logo.svg" alt="469 Las Guerrillas" className="empty-logo" />
                 <p className="empty-title">Drop a log file to get started</p>
                 <p className="empty-sub">
-                  Supports WPILOG · HOOT · REVLOG · RLOG · DS Log · CSV
+                  Supports WPILOG &middot; HOOT &middot; REVLOG &middot; RLOG &middot; DS Log &middot; CSV
                 </p>
                 <p className="empty-sub" style={{ marginTop: 4, opacity: 0.6 }}>
                   or click to browse
