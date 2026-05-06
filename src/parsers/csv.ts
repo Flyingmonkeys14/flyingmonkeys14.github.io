@@ -85,7 +85,7 @@ export async function parseCSV(
 
   const isKeyValueFormat =
     !isThreeCol &&
-    header.length >= 2 &&
+    header.length === 3 &&
     firstData.length >= 2 &&
     !isNaN(Number(firstData[0])) &&
     isNaN(Number(firstData[1]));
