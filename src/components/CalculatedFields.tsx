@@ -6,6 +6,11 @@ interface CalculatedFieldsProps {
   onAddField: (field: LogField) => void;
 }
 
+// ── safe expression evaluator ─────────────────────────────────────────────────
+// Replaces field references {/some/field} with the value at each timestamp,
+// then evaluates simple arithmetic + a few math functions.
+// Uses a whitelist-only approach: no eval(), no Function().
+
 type TokenType = "num" | "op" | "lparen" | "rparen" | "ident" | "eof";
 interface Token { type: TokenType; value: string }
 
@@ -29,7 +34,7 @@ function tokenize(expr: string): Token[] {
       while (i < expr.length && /[a-zA-Z0-9_]/.test(expr[i])) ident += expr[i++];
       tokens.push({ type: "ident", value: ident });
     } else {
-      i++;
+      i++; // skip unknown chars
     }
   }
   tokens.push({ type: "eof", value: "" });
@@ -51,7 +56,9 @@ class Parser {
 
   parse(): number { return this.parseExpr(); }
 
-  private parseExpr(): number { return this.parseAddSub(); }
+  private parseExpr(): number {
+    return this.parseAddSub();
+  }
 
   private parseAddSub(): number {
     let left = this.parseMulDiv();
@@ -94,7 +101,10 @@ class Parser {
 
   private parseAtom(): number {
     const t = this.peek();
-    if (t.type === "num") { this.consume(); return parseFloat(t.value); }
+    if (t.type === "num") {
+      this.consume();
+      return parseFloat(t.value);
+    }
     if (t.type === "lparen") {
       this.consume();
       const v = this.parseExpr();
@@ -104,6 +114,7 @@ class Parser {
     if (t.type === "ident") {
       this.consume();
       const fnName = t.value.toLowerCase();
+      // Math functions
       if (this.peek().type === "lparen") {
         this.consume();
         const arg = this.parseExpr();
@@ -128,8 +139,10 @@ class Parser {
           default: return arg;
         }
       }
+      // Named constants
       if (fnName === "pi") return Math.PI;
       if (fnName === "e") return Math.E;
+      // Variable reference
       return this.values.get(t.value) ?? 0;
     }
     return 0;
@@ -145,16 +158,20 @@ function evalExpr(expr: string, values: Map<string, number>): number {
   }
 }
 
+// Extract field placeholder names: tokens that match field keys in the log
 function extractFieldRefs(expr: string, fieldKeys: string[]): string[] {
   const refs: string[] = [];
+  // Sort by length desc so longer names match first
   const sorted = [...fieldKeys].sort((a, b) => b.length - a.length);
   for (const k of sorted) {
+    // Use sanitized ident name: replace non-alnum with _
     const ident = fieldKeyToIdent(k);
     if (expr.includes(ident) && !refs.includes(k)) refs.push(k);
   }
   return refs;
 }
 
+// Map a field key like "/Robot/Drive/Speed" to a valid identifier "Robot_Drive_Speed"
 function fieldKeyToIdent(key: string): string {
   return key.replace(/^\//, "").replace(/[^a-zA-Z0-9]/g, "_");
 }
@@ -164,6 +181,7 @@ export function CalculatedFields({ log, onAddField }: CalculatedFieldsProps) {
   const [expr, setExpr] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
+  const [progress, setProgress] = useState<number | null>(null);
 
   const numericFields = Object.values(log.fields).filter(
     (f) => f.type === "Number" || f.type === "Boolean"
@@ -185,6 +203,7 @@ export function CalculatedFields({ log, onAddField }: CalculatedFieldsProps) {
       return;
     }
 
+    // Test at the first common timestamp
     const firstTs = log.fields[refs[0]]?.entries[0]?.timestamp ?? log.startTime;
     const values = new Map<string, number>();
     for (const key of refs) {
@@ -198,8 +217,9 @@ export function CalculatedFields({ log, onAddField }: CalculatedFieldsProps) {
     setPreview(`Sample value at T=${firstTs.toFixed(2)}s: ${result.toPrecision(6)}`);
   }, [expr, numericFields, log]);
 
-  const handleCreate = useCallback(() => {
+  const handleCreate = useCallback(async () => {
     setError(null);
+    setPreview(null);
     const trimName = name.trim();
     if (!trimName) { setError("Enter a field name"); return; }
     if (!expr.trim()) { setError("Enter an expression"); return; }
@@ -207,10 +227,12 @@ export function CalculatedFields({ log, onAddField }: CalculatedFieldsProps) {
 
     const refs = extractFieldRefs(expr, numericFields.map((f) => f.key));
 
+    // Build a unified timestamp list from all referenced fields
     const tsSet = new Set<number>();
     for (const key of refs) {
       for (const e of log.fields[key]?.entries ?? []) tsSet.add(e.timestamp);
     }
+    // Also add all timestamps from first field if no refs (constant)
     if (refs.length === 0) {
       for (const e of Object.values(log.fields)[0]?.entries ?? []) tsSet.add(e.timestamp);
     }
@@ -218,22 +240,43 @@ export function CalculatedFields({ log, onAddField }: CalculatedFieldsProps) {
     const timestamps = Array.from(tsSet).sort((a, b) => a - b);
     if (timestamps.length === 0) { setError("No timestamps found in referenced fields"); return; }
 
+    setProgress(0);
+
+    // Per-field advancing pointer for O(m+n) step-hold interpolation
+    const ptrs = new Map<string, number>();
+    for (const key of refs) ptrs.set(key, 0);
+
     const entries: { timestamp: number; value: number }[] = [];
-    for (const ts of timestamps) {
+    let lastYield = Date.now();
+
+    for (let i = 0; i < timestamps.length; i++) {
+      if (Date.now() - lastYield > 40) {
+        setProgress(Math.round((i / timestamps.length) * 100));
+        await new Promise<void>((r) => setTimeout(r, 0));
+        lastYield = Date.now();
+      }
+
+      const ts = timestamps[i];
       const values = new Map<string, number>();
+
       for (const key of refs) {
         const field = log.fields[key];
-        const entry = field?.entries.reduce((best, e) => {
-          if (e.timestamp > ts) return best;
-          if (!best || e.timestamp > best.timestamp) return e;
-          return best;
-        }, null as null | typeof field.entries[0]);
-        const v = entry ? (typeof entry.value === "boolean" ? (entry.value ? 1 : 0) : (entry.value as number)) : 0;
+        if (!field) { values.set(fieldKeyToIdent(key), 0); continue; }
+        let ptr = ptrs.get(key)!;
+        while (ptr + 1 < field.entries.length && field.entries[ptr + 1].timestamp <= ts) ptr++;
+        ptrs.set(key, ptr);
+        const entry = field.entries[ptr];
+        const v = !entry || entry.timestamp > ts ? 0
+          : typeof entry.value === "boolean" ? (entry.value ? 1 : 0)
+          : (entry.value as number);
         values.set(fieldKeyToIdent(key), v);
       }
+
       const result = evalExpr(expr, values);
       if (isFinite(result)) entries.push({ timestamp: ts, value: result });
     }
+
+    setProgress(null);
 
     if (entries.length === 0) { setError("Expression produced no finite values"); return; }
 
@@ -254,6 +297,7 @@ export function CalculatedFields({ log, onAddField }: CalculatedFieldsProps) {
   return (
     <div className="calc-panel">
       <div className="calc-title">Calculated Field</div>
+
       <div className="calc-form">
         <label className="calc-label">New field name</label>
         <input
@@ -262,6 +306,7 @@ export function CalculatedFields({ log, onAddField }: CalculatedFieldsProps) {
           value={name}
           onChange={(e) => setName(e.target.value)}
         />
+
         <label className="calc-label">Expression</label>
         <input
           className="calc-input calc-expr"
@@ -269,17 +314,27 @@ export function CalculatedFields({ log, onAddField }: CalculatedFieldsProps) {
           value={expr}
           onChange={(e) => { setExpr(e.target.value); setError(null); setPreview(null); }}
         />
+
         <div className="calc-hint">
-          Operators: + − × / % ^(power) &nbsp;|&nbsp;
+          Operators: + &minus; &times; / % ^(power) &nbsp;|&nbsp;
           Functions: abs sqrt log sin cos tan ceil floor round sign exp
         </div>
+
         <div className="calc-buttons">
-          <button className="calc-btn-preview" onClick={handlePreview}>Preview</button>
-          <button className="calc-btn-create" onClick={handleCreate}>Create field</button>
+          <button className="calc-btn-preview" onClick={handlePreview} disabled={progress !== null}>Preview</button>
+          <button className="calc-btn-create" onClick={handleCreate} disabled={progress !== null}>
+            {progress !== null ? `Computing… ${progress}%` : "Create field"}
+          </button>
         </div>
+        {progress !== null && (
+          <div className="calc-progress-wrap">
+            <div className="calc-progress-bar" style={{ width: `${progress}%` }} />
+          </div>
+        )}
         {error && <div className="calc-error">{error}</div>}
         {preview && !error && <div className="calc-preview">{preview}</div>}
       </div>
+
       {numericFields.length > 0 && (
         <div className="calc-fields-list">
           <div className="calc-fields-label">Click to insert field name:</div>
