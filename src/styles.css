@@ -877,7 +877,25 @@ body {
   font-weight: 600;
   transition: background 0.15s;
 }
-.calc-btn-create:hover { background: #1e40af; }
+.calc-btn-create:hover:not(:disabled) { background: #1e40af; }
+.calc-btn-preview:disabled, .calc-btn-create:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.calc-progress-wrap {
+  height: 6px;
+  background: #1e293b;
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 2px;
+}
+.calc-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #2563eb, #60a5fa);
+  border-radius: 3px;
+  transition: width 0.1s linear;
+}
 
 .calc-error {
   color: var(--error);
