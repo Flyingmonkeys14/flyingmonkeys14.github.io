@@ -82,6 +82,26 @@ function encStr(s: string): Uint8Array {
   return new TextEncoder().encode(s);
 }
 
+// -- typeStr normalizer --
+function normalizeTypeStr(typeStr: string, logType: string): string {
+  const t = typeStr.toLowerCase();
+  const canonical = ["boolean", "double", "float", "int64", "int", "integer", "string", "json",
+    "boolean[]", "double[]", "float[]", "int64[]", "int[]", "string[]"];
+  if (canonical.includes(t)) return t;
+  if (t === "number") return "double";
+  if (t === "bool") return "boolean";
+  if (t === "numberarray") return "double[]";
+  if (t === "booleanarray") return "boolean[]";
+  if (t === "stringarray") return "string[]";
+  if (logType === "Number") return "double";
+  if (logType === "Boolean") return "boolean";
+  if (logType === "String") return "string";
+  if (logType === "NumberArray") return "double[]";
+  if (logType === "BooleanArray") return "boolean[]";
+  if (logType === "StringArray") return "string[]";
+  return typeStr;
+}
+
 // -- value encoder --
 
 function encodeValue(typeStr: string, value: LogValue): Uint8Array | null {
@@ -210,7 +230,8 @@ export function encodeWPILOG(log: ParsedLog, selectedKeys: string[]): ArrayBuffe
   for (const key of fieldKeys) {
     const field = log.fields[key];
     const entryId = idMap.get(key)!;
-    const startData = buildStartRecord(entryId, key, field.typeStr, field.metadata ?? "");
+    const norm = normalizeTypeStr(field.typeStr, field.type);
+    const startData = buildStartRecord(entryId, key, norm, field.metadata ?? "");
     writeRecord(buf, 0, 0, startData);
   }
 
@@ -220,8 +241,9 @@ export function encodeWPILOG(log: ParsedLog, selectedKeys: string[]): ArrayBuffe
   for (const key of fieldKeys) {
     const field = log.fields[key];
     const entryId = idMap.get(key)!;
+    const norm = normalizeTypeStr(field.typeStr, field.type);
     for (const entry of field.entries) {
-      const data = encodeValue(field.typeStr, entry.value);
+      const data = encodeValue(norm, entry.value);
       if (!data) continue;
       const timestampUs = Math.round((entry.timestamp - originSec) * 1_000_000);
       events.push({ timestampUs, entryId, data });

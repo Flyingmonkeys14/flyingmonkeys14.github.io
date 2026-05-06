@@ -1,6 +1,7 @@
 /**
  * WPILOG binary format parser.
  * Spec: https://github.com/wpilibsuite/allwpilib/blob/main/wpiutil/doc/datalog.adoc
+ * Also handles .hoot (CTRE Phoenix 6) which wraps WPILOG with a variable-length header.
  */
 
 import type { LogField, LogValue } from "../types";
@@ -38,7 +39,7 @@ export function typeStrToLoggable(typeStr: string): LogField["type"] {
   if (t === "boolean[]") return "BooleanArray";
   if (t === "int64[]" || t === "float[]" || t === "double[]" || t === "int[]") return "NumberArray";
   if (t === "string[]") return "StringArray";
-  if (t === "raw" || t === "byte[]" || t.startsWith("struct:") || t.startsWith("proto:")) return "Raw";
+  if (t.startsWith("struct:") || t.startsWith("proto:") || t === "raw" || t === "byte[]") return "Raw";
   return "Raw";
 }
 
@@ -105,37 +106,123 @@ function decodeValue(
   return data.slice(offset, offset + length);
 }
 
+// ── Struct descriptor decoder ────────────────────────────────────────────────
+
+interface StructField {
+  name: string;
+  type: string;
+  count: number;
+  bitWidth?: number;
+}
+
+const STRUCT_SCALAR_SIZES: Record<string, number> = {
+  bool: 1, int8: 1, uint8: 1,
+  int16: 2, uint16: 2,
+  int32: 4, uint32: 4, float: 4,
+  int64: 8, uint64: 8, double: 8,
+};
+
+function parseStructDescriptor(descriptor: string): StructField[] {
+  const fields: StructField[] = [];
+  const re = /(\w+)(?:\[(\d+)\])?\s+(\w+)(?::(\d+))?/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(descriptor)) !== null) {
+    const [, type, countStr, name, bitWidthStr] = m;
+    fields.push({
+      name,
+      type: type.toLowerCase(),
+      count: countStr ? parseInt(countStr) : 1,
+      bitWidth: bitWidthStr ? parseInt(bitWidthStr) : undefined,
+    });
+  }
+  return fields;
+}
+
+function decodeStructValue(fields: StructField[], data: Uint8Array, offset: number, length: number): Record<string, number | boolean> | null {
+  const view = new DataView(data.buffer, data.byteOffset + offset, length);
+  const result: Record<string, number | boolean> = {};
+  let pos = 0;
+
+  for (const field of fields) {
+    const size = STRUCT_SCALAR_SIZES[field.type];
+    if (!size) continue;
+
+    const totalSize = size * field.count;
+    if (pos + totalSize > length) break;
+
+    if (field.count === 1) {
+      let val: number | boolean;
+      switch (field.type) {
+        case "bool": val = view.getUint8(pos) !== 0; break;
+        case "int8": val = view.getInt8(pos); break;
+        case "uint8": val = view.getUint8(pos); break;
+        case "int16": val = view.getInt16(pos, true); break;
+        case "uint16": val = view.getUint16(pos, true); break;
+        case "int32": val = view.getInt32(pos, true); break;
+        case "uint32": val = view.getUint32(pos, true); break;
+        case "float": val = view.getFloat32(pos, true); break;
+        case "int64": { const lo = view.getUint32(pos, true); val = view.getInt32(pos + 4, true) * 2 ** 32 + lo; break; }
+        case "uint64": { const lo = view.getUint32(pos, true); val = view.getUint32(pos + 4, true) * 2 ** 32 + lo; break; }
+        case "double": val = view.getFloat64(pos, true); break;
+        default: pos += totalSize; continue;
+      }
+      result[field.name] = val;
+    }
+    pos += totalSize;
+  }
+
+  return Object.keys(result).length > 0 ? result : null;
+}
+
+// ── Find WPILOG magic within a buffer (for HOOT prefix-header files) ─────────
+function findWPILOGOffset(bytes: Uint8Array): number {
+  const magic = new TextEncoder().encode(WPILOG_MAGIC);
+  const scanEnd = Math.min(bytes.length - magic.length, 65536);
+  outer: for (let i = 0; i <= scanEnd; i++) {
+    for (let j = 0; j < magic.length; j++) {
+      if (bytes[i + j] !== magic[j]) continue outer;
+    }
+    return i;
+  }
+  return -1;
+}
+
 export async function parseWPILOG(
   buffer: ArrayBuffer,
   filename: string,
   onProgress?: ProgressCallback
 ): Promise<ParsedLog> {
   const bytes = new Uint8Array(buffer);
-  const view = new DataView(buffer);
   const totalBytes = bytes.length;
 
+  let startOffset = 0;
   const magic = new TextDecoder().decode(bytes.subarray(0, 7));
   if (magic !== WPILOG_MAGIC) {
-    throw new Error("Not a valid WPILOG file (bad magic bytes)");
+    const found = findWPILOGOffset(bytes);
+    if (found === -1) {
+      throw new Error(`Not a valid WPILOG/HOOT file — WPILOG magic bytes not found in ${filename}`);
+    }
+    startOffset = found;
   }
 
-  const version = view.getUint16(7, true);
-  if (version < 0x0100 || version > 0x0200) {
-    console.warn(`WPILOG version 0x${version.toString(16)} may not be fully supported`);
+  const view = new DataView(buffer);
+  const version = view.getUint16(startOffset + 7, true);
+  if (version < 0x0100 || version > 0x0300) {
+    console.warn(`WPILOG version 0x${version.toString(16)} in ${filename} may not be fully supported`);
   }
 
-  const extraLen = view.getUint32(9, true);
-  let pos = 13 + extraLen;
+  const extraLen = view.getUint32(startOffset + 9, true);
+  let pos = startOffset + 13 + extraLen;
 
   const entryMap = new Map<number, EntryInfo>();
   const fields: Record<string, LogField> = {};
+  const structDescriptors = new Map<string, StructField[]>();
 
   let lastYield = Date.now();
 
   while (pos < bytes.length) {
-    // Yield to UI thread every 40ms to allow progress updates
     if (onProgress && Date.now() - lastYield > 40) {
-      onProgress(pos / totalBytes);
+      onProgress((pos - startOffset) / (totalBytes - startOffset));
       await new Promise<void>((r) => setTimeout(r, 0));
       lastYield = Date.now();
     }
@@ -183,14 +270,51 @@ export async function parseWPILOG(
         const metadata = decodeString(bytes, cpos, metaLen);
 
         entryMap.set(newEntryId, { name, typeStr, metadata });
+
+        const isStruct = typeStr.toLowerCase().startsWith("struct:");
         if (!fields[name]) {
-          fields[name] = {
-            key: name,
-            type: typeStrToLoggable(typeStr),
-            typeStr,
-            entries: [],
-            metadata,
-          };
+          if (isStruct) {
+            let descriptor = "";
+            try {
+              const meta = JSON.parse(metadata);
+              descriptor = meta.schema ?? meta.descriptor ?? "";
+            } catch {
+              descriptor = metadata;
+            }
+
+            if (descriptor) {
+              const parsed = parseStructDescriptor(descriptor);
+              if (parsed.length > 0) {
+                structDescriptors.set(name, parsed);
+                for (const sf of parsed) {
+                  if (!STRUCT_SCALAR_SIZES[sf.type]) continue;
+                  const subKey = `${name}/${sf.name}`;
+                  fields[subKey] = {
+                    key: subKey,
+                    type: sf.type === "bool" ? "Boolean" : "Number",
+                    typeStr: sf.type === "double" || sf.type === "float" ? sf.type : "double",
+                    entries: [],
+                    metadata,
+                  };
+                }
+              }
+            }
+            fields[name] = {
+              key: name,
+              type: "Raw",
+              typeStr,
+              entries: [],
+              metadata,
+            };
+          } else {
+            fields[name] = {
+              key: name,
+              type: typeStrToLoggable(typeStr),
+              typeStr,
+              entries: [],
+              metadata,
+            };
+          }
         }
       }
     } else {
@@ -199,13 +323,24 @@ export async function parseWPILOG(
         const field = fields[info.name];
         if (field) {
           try {
+            const ts = timestampUs / 1_000_000;
             const value = decodeValue(info.typeStr, bytes, pos, dataSize);
-            field.entries.push({
-              timestamp: timestampUs / 1_000_000,
-              value,
-            });
+            field.entries.push({ timestamp: ts, value });
+
+            if (info.typeStr.toLowerCase().startsWith("struct:")) {
+              const structFields = structDescriptors.get(info.name);
+              if (structFields && value instanceof Uint8Array) {
+                const decoded = decodeStructValue(structFields, value, 0, value.byteLength);
+                if (decoded) {
+                  for (const [memberName, memberVal] of Object.entries(decoded)) {
+                    const subKey = `${info.name}/${memberName}`;
+                    fields[subKey]?.entries.push({ timestamp: ts, value: memberVal as number | boolean });
+                  }
+                }
+              }
+            }
           } catch {
-            // Skip malformed data records
+            // Skip malformed records
           }
         }
       }
