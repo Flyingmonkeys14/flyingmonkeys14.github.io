@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 120" width="320" height="120">
+  <!-- Yellow banana shape -->
+  <path d="M 8 110 C 0 85, 0 35, 20 10 C 60 -5, 80 15, 80 60 C 80 95, 65 115, 45 118 Z" fill="#F5D800" stroke="#D4B800" stroke-width="1.5"/>
+  <!-- 469 text on banana -->
+  <text x="32" y="45" font-family="Arial Black, Arial" font-weight="900" font-size="22" fill="#1a1a1a" text-anchor="middle">4</text>
+  <text x="32" y="72" font-family="Arial Black, Arial" font-weight="900" font-size="22" fill="#1a1a1a" text-anchor="middle">6</text>
+  <text x="32" y="99" font-family="Arial Black, Arial" font-weight="900" font-size="22" fill="#1a1a1a" text-anchor="middle">9</text>
+
+  <!-- Green diamond -->
+  <polygon points="68,60 110,15 152,60 110,105" fill="#2D8A2D"/>
+
+  <!-- Yellow stripe through center -->
+  <rect x="60" y="50" width="260" height="20" fill="#F5D800"/>
+
+  <!-- Black banner behind text -->
+  <rect x="100" y="50" width="220" height="20" fill="#1a1a1a"/>
+
+  <!-- LAS text (yellow on green overlap) -->
+  <text x="113" y="65" font-family="Arial Black, Arial" font-weight="900" font-size="15" fill="#F5D800" letter-spacing="1">LAS</text>
+
+  <!-- GUERRILLAS text (white on black) -->
+  <text x="152" y="65" font-family="Arial Black, Arial" font-weight="900" font-size="15" fill="#ffffff" letter-spacing="0.5">GUERRILLAS</text>
+</svg>

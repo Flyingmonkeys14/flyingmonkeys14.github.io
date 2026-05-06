@@ -51,9 +51,10 @@ export function PasswordGate({ onAuth }: PasswordGateProps) {
   return (
     <div className="auth-overlay">
       <div className="auth-card">
-        <div className="auth-logo">📊</div>
+        <img src="/logo.svg" alt="469 Las Guerrillas" className="auth-logo-img" />
         <h1 className="auth-title">Online AdvantageScope</h1>
-        <p className="auth-sub">Enter the access password to continue</p>
+        <p className="auth-sub">Team 469 &middot; Las Guerrillas</p>
+        <p className="auth-sub" style={{ marginTop: -4, fontSize: 12 }}>Enter the access password to continue</p>
         <form onSubmit={handleSubmit} className="auth-form">
           <input
             ref={inputRef}

@@ -1,0 +1,302 @@
+import { useState, useCallback } from "react";
+import type { ParsedLog, LogField } from "../types";
+
+interface CalculatedFieldsProps {
+  log: ParsedLog;
+  onAddField: (field: LogField) => void;
+}
+
+type TokenType = "num" | "op" | "lparen" | "rparen" | "ident" | "eof";
+interface Token { type: TokenType; value: string }
+
+function tokenize(expr: string): Token[] {
+  const tokens: Token[] = [];
+  let i = 0;
+  while (i < expr.length) {
+    if (/\s/.test(expr[i])) { i++; continue; }
+    if (/[0-9.]/.test(expr[i])) {
+      let num = "";
+      while (i < expr.length && /[0-9.eE+\-]/.test(expr[i])) num += expr[i++];
+      tokens.push({ type: "num", value: num });
+    } else if (/[+\-*/%^]/.test(expr[i])) {
+      tokens.push({ type: "op", value: expr[i++] });
+    } else if (expr[i] === "(") {
+      tokens.push({ type: "lparen", value: "(" }); i++;
+    } else if (expr[i] === ")") {
+      tokens.push({ type: "rparen", value: ")" }); i++;
+    } else if (/[a-zA-Z_]/.test(expr[i])) {
+      let ident = "";
+      while (i < expr.length && /[a-zA-Z0-9_]/.test(expr[i])) ident += expr[i++];
+      tokens.push({ type: "ident", value: ident });
+    } else {
+      i++;
+    }
+  }
+  tokens.push({ type: "eof", value: "" });
+  return tokens;
+}
+
+class Parser {
+  private tokens: Token[];
+  private pos = 0;
+  private values: Map<string, number>;
+
+  constructor(tokens: Token[], values: Map<string, number>) {
+    this.tokens = tokens;
+    this.values = values;
+  }
+
+  private peek() { return this.tokens[this.pos]; }
+  private consume() { return this.tokens[this.pos++]; }
+
+  parse(): number { return this.parseExpr(); }
+
+  private parseExpr(): number { return this.parseAddSub(); }
+
+  private parseAddSub(): number {
+    let left = this.parseMulDiv();
+    while (this.peek().type === "op" && (this.peek().value === "+" || this.peek().value === "-")) {
+      const op = this.consume().value;
+      const right = this.parseMulDiv();
+      left = op === "+" ? left + right : left - right;
+    }
+    return left;
+  }
+
+  private parseMulDiv(): number {
+    let left = this.parsePow();
+    while (this.peek().type === "op" && (this.peek().value === "*" || this.peek().value === "/" || this.peek().value === "%")) {
+      const op = this.consume().value;
+      const right = this.parsePow();
+      if (op === "*") left = left * right;
+      else if (op === "/") left = right !== 0 ? left / right : NaN;
+      else left = left % right;
+    }
+    return left;
+  }
+
+  private parsePow(): number {
+    const base = this.parseUnary();
+    if (this.peek().type === "op" && this.peek().value === "^") {
+      this.consume();
+      return Math.pow(base, this.parsePow());
+    }
+    return base;
+  }
+
+  private parseUnary(): number {
+    if (this.peek().type === "op" && this.peek().value === "-") {
+      this.consume();
+      return -this.parseAtom();
+    }
+    return this.parseAtom();
+  }
+
+  private parseAtom(): number {
+    const t = this.peek();
+    if (t.type === "num") { this.consume(); return parseFloat(t.value); }
+    if (t.type === "lparen") {
+      this.consume();
+      const v = this.parseExpr();
+      if (this.peek().type === "rparen") this.consume();
+      return v;
+    }
+    if (t.type === "ident") {
+      this.consume();
+      const fnName = t.value.toLowerCase();
+      if (this.peek().type === "lparen") {
+        this.consume();
+        const arg = this.parseExpr();
+        if (this.peek().type === "rparen") this.consume();
+        switch (fnName) {
+          case "abs": return Math.abs(arg);
+          case "sqrt": return Math.sqrt(arg);
+          case "log": return Math.log(arg);
+          case "log10": return Math.log10(arg);
+          case "log2": return Math.log2(arg);
+          case "exp": return Math.exp(arg);
+          case "sin": return Math.sin(arg);
+          case "cos": return Math.cos(arg);
+          case "tan": return Math.tan(arg);
+          case "asin": return Math.asin(arg);
+          case "acos": return Math.acos(arg);
+          case "atan": return Math.atan(arg);
+          case "ceil": return Math.ceil(arg);
+          case "floor": return Math.floor(arg);
+          case "round": return Math.round(arg);
+          case "sign": return Math.sign(arg);
+          default: return arg;
+        }
+      }
+      if (fnName === "pi") return Math.PI;
+      if (fnName === "e") return Math.E;
+      return this.values.get(t.value) ?? 0;
+    }
+    return 0;
+  }
+}
+
+function evalExpr(expr: string, values: Map<string, number>): number {
+  try {
+    const tokens = tokenize(expr);
+    return new Parser(tokens, values).parse();
+  } catch {
+    return NaN;
+  }
+}
+
+function extractFieldRefs(expr: string, fieldKeys: string[]): string[] {
+  const refs: string[] = [];
+  const sorted = [...fieldKeys].sort((a, b) => b.length - a.length);
+  for (const k of sorted) {
+    const ident = fieldKeyToIdent(k);
+    if (expr.includes(ident) && !refs.includes(k)) refs.push(k);
+  }
+  return refs;
+}
+
+function fieldKeyToIdent(key: string): string {
+  return key.replace(/^\//, "").replace(/[^a-zA-Z0-9]/g, "_");
+}
+
+export function CalculatedFields({ log, onAddField }: CalculatedFieldsProps) {
+  const [name, setName] = useState("");
+  const [expr, setExpr] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+
+  const numericFields = Object.values(log.fields).filter(
+    (f) => f.type === "Number" || f.type === "Boolean"
+  );
+
+  const insertIdent = useCallback((key: string) => {
+    setExpr((prev) => prev + fieldKeyToIdent(key));
+  }, []);
+
+  const handlePreview = useCallback(() => {
+    setError(null);
+    setPreview(null);
+    if (!expr.trim()) { setError("Enter an expression"); return; }
+
+    const refs = extractFieldRefs(expr, numericFields.map((f) => f.key));
+    if (refs.length === 0) {
+      const val = evalExpr(expr, new Map());
+      setPreview(`Constant value: ${val}`);
+      return;
+    }
+
+    const firstTs = log.fields[refs[0]]?.entries[0]?.timestamp ?? log.startTime;
+    const values = new Map<string, number>();
+    for (const key of refs) {
+      const field = log.fields[key];
+      const entry = field?.entries.find((e) => e.timestamp >= firstTs);
+      const v = entry ? (typeof entry.value === "boolean" ? (entry.value ? 1 : 0) : (entry.value as number)) : 0;
+      values.set(fieldKeyToIdent(key), v);
+    }
+    const result = evalExpr(expr, values);
+    if (isNaN(result)) { setError("Expression returned NaN — check field names and syntax"); return; }
+    setPreview(`Sample value at T=${firstTs.toFixed(2)}s: ${result.toPrecision(6)}`);
+  }, [expr, numericFields, log]);
+
+  const handleCreate = useCallback(() => {
+    setError(null);
+    const trimName = name.trim();
+    if (!trimName) { setError("Enter a field name"); return; }
+    if (!expr.trim()) { setError("Enter an expression"); return; }
+    if (log.fields[trimName]) { setError(`Field "${trimName}" already exists`); return; }
+
+    const refs = extractFieldRefs(expr, numericFields.map((f) => f.key));
+
+    const tsSet = new Set<number>();
+    for (const key of refs) {
+      for (const e of log.fields[key]?.entries ?? []) tsSet.add(e.timestamp);
+    }
+    if (refs.length === 0) {
+      for (const e of Object.values(log.fields)[0]?.entries ?? []) tsSet.add(e.timestamp);
+    }
+
+    const timestamps = Array.from(tsSet).sort((a, b) => a - b);
+    if (timestamps.length === 0) { setError("No timestamps found in referenced fields"); return; }
+
+    const entries: { timestamp: number; value: number }[] = [];
+    for (const ts of timestamps) {
+      const values = new Map<string, number>();
+      for (const key of refs) {
+        const field = log.fields[key];
+        const entry = field?.entries.reduce((best, e) => {
+          if (e.timestamp > ts) return best;
+          if (!best || e.timestamp > best.timestamp) return e;
+          return best;
+        }, null as null | typeof field.entries[0]);
+        const v = entry ? (typeof entry.value === "boolean" ? (entry.value ? 1 : 0) : (entry.value as number)) : 0;
+        values.set(fieldKeyToIdent(key), v);
+      }
+      const result = evalExpr(expr, values);
+      if (isFinite(result)) entries.push({ timestamp: ts, value: result });
+    }
+
+    if (entries.length === 0) { setError("Expression produced no finite values"); return; }
+
+    const newField: LogField = {
+      key: trimName,
+      type: "Number",
+      typeStr: "double",
+      entries,
+      metadata: `calculated:${expr}`,
+    };
+
+    onAddField(newField);
+    setName("");
+    setExpr("");
+    setPreview(`Created "${trimName}" with ${entries.length} data points.`);
+  }, [name, expr, numericFields, log, onAddField]);
+
+  return (
+    <div className="calc-panel">
+      <div className="calc-title">Calculated Field</div>
+      <div className="calc-form">
+        <label className="calc-label">New field name</label>
+        <input
+          className="calc-input"
+          placeholder="/MyCalc/result"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+        <label className="calc-label">Expression</label>
+        <input
+          className="calc-input calc-expr"
+          placeholder="e.g. Field_A * Field_B + 2.5"
+          value={expr}
+          onChange={(e) => { setExpr(e.target.value); setError(null); setPreview(null); }}
+        />
+        <div className="calc-hint">
+          Operators: + − × / % ^(power) &nbsp;|&nbsp;
+          Functions: abs sqrt log sin cos tan ceil floor round sign exp
+        </div>
+        <div className="calc-buttons">
+          <button className="calc-btn-preview" onClick={handlePreview}>Preview</button>
+          <button className="calc-btn-create" onClick={handleCreate}>Create field</button>
+        </div>
+        {error && <div className="calc-error">{error}</div>}
+        {preview && !error && <div className="calc-preview">{preview}</div>}
+      </div>
+      {numericFields.length > 0 && (
+        <div className="calc-fields-list">
+          <div className="calc-fields-label">Click to insert field name:</div>
+          <div className="calc-fields-scroll">
+            {numericFields.map((f) => (
+              <button
+                key={f.key}
+                className="calc-field-chip"
+                title={f.key}
+                onClick={() => insertIdent(f.key)}
+              >
+                {fieldKeyToIdent(f.key)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

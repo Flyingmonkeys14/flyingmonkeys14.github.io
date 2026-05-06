@@ -10,28 +10,34 @@ import type { ParsedLog } from "../types";
 
 type ProgressCallback = (progress: number) => void;
 
+const NULL_LIKE = new Set(["", "null", "NULL", "N/A", "n/a", "NA", "na", "NaN", "nan", "undefined"]);
+
 function inferType(values: string[]): LogField["type"] {
-  const sample = values.filter(Boolean).slice(0, 20);
-  if (sample.every((v) => v === "true" || v === "false")) return "Boolean";
-  if (sample.every((v) => !isNaN(Number(v)))) return "Number";
+  const sample = values.filter((v) => !NULL_LIKE.has(v.trim())).slice(0, 100);
+  if (sample.length === 0) return "Number";
+  if (sample.every((v) => v.toLowerCase() === "true" || v.toLowerCase() === "false")) return "Boolean";
+  if (sample.every((v) => v !== "" && !isNaN(Number(v)))) return "Number";
   return "String";
 }
 
 function parseValue(raw: string, type: LogField["type"]): LogValue {
   const trimmed = raw.trim();
+
+  if (type === "Number") {
+    if (NULL_LIKE.has(trimmed)) return 0;
+    const n = Number(trimmed);
+    return isNaN(n) ? 0 : n;
+  }
+
   if (trimmed === "") return null;
 
   if (type === "Boolean") return trimmed.toLowerCase() === "true";
-  if (type === "Number") {
-    const n = Number(trimmed);
-    return isNaN(n) ? null : n;
-  }
 
   if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
     const inner = trimmed.slice(1, -1);
     const parts = inner.split(/[,;]/).map((s) => s.trim());
-    if (parts.every((p) => p === "true" || p === "false")) {
-      return parts.map((p) => p === "true");
+    if (parts.every((p) => p.toLowerCase() === "true" || p.toLowerCase() === "false")) {
+      return parts.map((p) => p.toLowerCase() === "true");
     }
     const nums = parts.map(Number);
     if (nums.every((n) => !isNaN(n))) return nums;
@@ -59,7 +65,7 @@ function splitCSVLine(line: string): string[] {
   return result;
 }
 
-const YIELD_EVERY = 500; // lines
+const YIELD_EVERY = 500;
 
 export async function parseCSV(
   text: string,
@@ -79,7 +85,7 @@ export async function parseCSV(
 
   const isKeyValueFormat =
     !isThreeCol &&
-    header.length === 3 &&
+    header.length >= 2 &&
     firstData.length >= 2 &&
     !isNaN(Number(firstData[0])) &&
     isNaN(Number(firstData[1]));
@@ -95,10 +101,11 @@ export async function parseCSV(
     }
 
     for (const key of Object.keys(rawValues)) {
+      const t = inferType(rawValues[key]);
       fields[key] = {
         key,
-        type: inferType(rawValues[key]),
-        typeStr: inferType(rawValues[key]).toLowerCase(),
+        type: t,
+        typeStr: t === "Number" ? "double" : t.toLowerCase(),
         entries: [],
       };
     }
@@ -133,10 +140,11 @@ export async function parseCSV(
     }
 
     for (const key of keys) {
+      const t = inferType(rawValues[key]);
       fields[key] = {
         key,
-        type: inferType(rawValues[key]),
-        typeStr: inferType(rawValues[key]).toLowerCase(),
+        type: t,
+        typeStr: t === "Number" ? "double" : t.toLowerCase(),
         entries: [],
       };
     }
