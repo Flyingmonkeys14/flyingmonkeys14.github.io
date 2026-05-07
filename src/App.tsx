@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import type { ParsedLog, LogField } from "./types";
 import { parseLogFile } from "./parsers/index";
 import { downloadWPILOG } from "./parsers/wpilogWriter";
@@ -7,6 +7,7 @@ import { scanWPILOGFieldNames } from "./parsers/wpilogExtract";
 import { PasswordGate, isAuthenticated } from "./components/PasswordGate";
 import { FieldTree } from "./components/FieldTree";
 import { TimeChart, ValueTable } from "./components/TimeChart";
+import type { LogSelection } from "./components/TimeChart";
 import { TimeSlider } from "./components/TimeSlider";
 import { StatsTable } from "./components/StatsTable";
 import { CalculatedFields } from "./components/CalculatedFields";
@@ -46,7 +47,8 @@ export default function App() {
   const [authed, setAuthed] = useState(isAuthenticated);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [activeLog, setActiveLog] = useState<string | null>(null);
-  const [selectedFields, setSelectedFields] = useState<Set<string>>(new Set());
+  const [selectedFieldsByLog, setSelectedFieldsByLog] = useState<Map<string, Set<string>>>(new Map());
+  const [trimByLog, setTrimByLog] = useState<Map<string, [number, number]>>(new Map());
   const [currentTime, setCurrentTime] = useState(0);
   const [tab, setTab] = useState<Tab>("chart");
   const [manifestError, setManifestError] = useState<string | null>(null);
@@ -190,12 +192,14 @@ export default function App() {
   const handleSelectLog = useCallback(
     (filename: string) => {
       setActiveLog(filename);
-      setSelectedFields(new Set());
       setShowCalc(false);
       const entry = logs.find((e) => e.filename === filename);
-      if (entry?.log) setCurrentTime(entry.log.startTime);
+      if (entry?.log) {
+        const trim = trimByLog.get(filename);
+        setCurrentTime(trim ? trim[0] : entry.log.startTime);
+      }
     },
-    [logs]
+    [logs, trimByLog]
   );
 
   useEffect(() => {
@@ -203,18 +207,66 @@ export default function App() {
   }, [log]);
 
   const toggleField = useCallback((key: string) => {
-    setSelectedFields((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
+    if (!activeLog) return;
+    const filename = activeLog;
+    setSelectedFieldsByLog((prev) => {
+      const next = new Map(prev);
+      const set = new Set(next.get(filename) ?? []);
+      if (set.has(key)) set.delete(key);
+      else set.add(key);
+      next.set(filename, set);
       return next;
     });
-  }, []);
+  }, [activeLog]);
+
+  const activeSelectedFields = useMemo(
+    () => (activeLog ? (selectedFieldsByLog.get(activeLog) ?? new Set<string>()) : new Set<string>()),
+    [activeLog, selectedFieldsByLog]
+  );
+
+  const chartSelections = useMemo<LogSelection[]>(
+    () =>
+      logs
+        .filter((e) => e.log && (selectedFieldsByLog.get(e.filename)?.size ?? 0) > 0)
+        .map((e) => {
+          const trim = trimByLog.get(e.filename);
+          return {
+            log: e.log!,
+            fields: selectedFieldsByLog.get(e.filename)!,
+            trimStart: trim?.[0],
+            trimEnd: trim?.[1],
+          };
+        }),
+    [logs, selectedFieldsByLog, trimByLog]
+  );
+
+  const activeTrimStart = log ? (trimByLog.get(log.filename)?.[0] ?? log.startTime) : 0;
+  const activeTrimEnd = log ? (trimByLog.get(log.filename)?.[1] ?? log.endTime) : 0;
+
+  const handleTrimChange = useCallback((start: number, end: number) => {
+    if (!log) return;
+    const filename = log.filename;
+    setTrimByLog((prev) => {
+      const next = new Map(prev);
+      next.set(filename, [start, end]);
+      return next;
+    });
+  }, [log]);
+
+  const handleTrimReset = useCallback(() => {
+    if (!log) return;
+    const filename = log.filename;
+    setTrimByLog((prev) => {
+      const next = new Map(prev);
+      next.delete(filename);
+      return next;
+    });
+  }, [log]);
 
   const handleExport = useCallback(() => {
-    if (!log || selectedFields.size === 0) return;
-    downloadWPILOG(log, Array.from(selectedFields));
-  }, [log, selectedFields]);
+    if (!log || activeSelectedFields.size === 0) return;
+    downloadWPILOG(log, Array.from(activeSelectedFields));
+  }, [log, activeSelectedFields]);
 
   const handleExtractFileSelected = useCallback(async (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -286,9 +338,9 @@ export default function App() {
             &#9660; Extract Fields
           </button>
 
-          {selectedFields.size > 0 && log && (
+          {activeSelectedFields.size > 0 && log && (
             <button className="btn-export" onClick={handleExport} title="Save selected fields as a new WPILOG file">
-              &darr; Export {selectedFields.size} field{selectedFields.size !== 1 ? "s" : ""} as WPILOG
+              &darr; Export {activeSelectedFields.size} field{activeSelectedFields.size !== 1 ? "s" : ""} as WPILOG
             </button>
           )}
 
@@ -375,7 +427,7 @@ export default function App() {
           {log ? (
             <FieldTree
               tree={log.fieldTree}
-              selectedFields={selectedFields}
+              selectedFields={activeSelectedFields}
               onToggleField={toggleField}
             />
           ) : activeEntry?.loading ? (
@@ -434,7 +486,7 @@ export default function App() {
                 >
                   Stats
                 </button>
-                {selectedFields.size === 0 && (
+                {chartSelections.length === 0 && (
                   <span className="tab-hint">&larr; Select fields from the sidebar</span>
                 )}
               </div>
@@ -444,19 +496,19 @@ export default function App() {
                   <CalculatedFields log={log} onAddField={handleAddCalculatedField} />
                 ) : tab === "chart" ? (
                   <TimeChart
-                    log={log}
-                    selectedFields={selectedFields}
+                    selections={chartSelections}
+                    activeLog={log}
                     currentTime={currentTime}
                     onTimeChange={setCurrentTime}
                   />
                 ) : tab === "table" ? (
                   <ValueTable
                     log={log}
-                    selectedFields={selectedFields}
+                    selectedFields={activeSelectedFields}
                     currentTime={currentTime}
                   />
                 ) : (
-                  <StatsTable log={log} selectedFields={selectedFields} />
+                  <StatsTable log={log} selectedFields={activeSelectedFields} />
                 )}
               </div>
 
@@ -466,6 +518,10 @@ export default function App() {
                   endTime={log.endTime}
                   currentTime={currentTime}
                   onTimeChange={setCurrentTime}
+                  trimStart={activeTrimStart}
+                  trimEnd={activeTrimEnd}
+                  onTrimChange={handleTrimChange}
+                  onTrimReset={handleTrimReset}
                 />
               )}
             </>
