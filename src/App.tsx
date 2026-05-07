@@ -43,6 +43,40 @@ async function fetchLogFile(filename: string): Promise<File> {
   return new File([blob], filename);
 }
 
+// Enabled-field candidates in priority order, matching AdvantageScope's getEnabledKey()
+const ENABLED_CANDIDATES: { key: string; getValue: (v: unknown) => boolean }[] = [
+  { key: "/DriverStation/Enabled",                  getValue: (v) => Boolean(v) },
+  { key: "NT:/AdvantageKit/DriverStation/Enabled",  getValue: (v) => Boolean(v) },
+  { key: "DS:enabled",                              getValue: (v) => Boolean(v) },
+  { key: "/DSLog/Status/DSDisabled",                getValue: (v) => !v },
+  { key: "RobotEnable",                             getValue: (v) => Boolean(v) },
+  { key: "NT:/FMSInfo/FMSControlData",              getValue: (v) => (v as number) % 2 === 1 },
+  { key: "RUNNING",                                 getValue: (v) => Boolean(v) },
+];
+
+function findEnabledRange(log: ParsedLog): [number, number] | null {
+  const candidate = ENABLED_CANDIDATES.find((c) => log.fields[c.key]);
+  if (!candidate) return null;
+  const { key, getValue } = candidate;
+  const entries = log.fields[key].entries;
+  if (entries.length === 0) return null;
+
+  const firstEnableIdx = entries.findIndex((e) => getValue(e.value));
+  if (firstEnableIdx < 0) return null;
+
+  // Find the last disable after the first enable (only if the log ends disabled)
+  let lastDisableIdx = -1;
+  if (!getValue(entries[entries.length - 1].value)) {
+    for (let i = entries.length - 1; i >= firstEnableIdx; i--) {
+      if (!getValue(entries[i].value)) { lastDisableIdx = i; break; }
+    }
+  }
+
+  const trimStart = entries[firstEnableIdx].timestamp;
+  const trimEnd = lastDisableIdx >= firstEnableIdx ? entries[lastDisableIdx].timestamp : log.endTime;
+  return trimEnd > trimStart ? [trimStart, trimEnd] : null;
+}
+
 export default function App() {
   const [authed, setAuthed] = useState(isAuthenticated);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -263,6 +297,22 @@ export default function App() {
     });
   }, [log]);
 
+  const handleAutoTrim = useCallback(() => {
+    if (!log) return;
+    const range = findEnabledRange(log);
+    if (range) handleTrimChange(range[0], range[1]);
+  }, [log, handleTrimChange]);
+
+  const handleRemoveLog = useCallback((filename: string) => {
+    setLogs((prev) => prev.filter((e) => e.filename !== filename));
+    setSelectedFieldsByLog((prev) => { const next = new Map(prev); next.delete(filename); return next; });
+    setTrimByLog((prev) => { const next = new Map(prev); next.delete(filename); return next; });
+    if (activeLog === filename) {
+      const remaining = logs.filter((e) => e.filename !== filename);
+      setActiveLog(remaining[0]?.filename ?? null);
+    }
+  }, [activeLog, logs]);
+
   const handleExport = useCallback(() => {
     if (!log || activeSelectedFields.size === 0) return;
     downloadWPILOG(log, Array.from(activeSelectedFields));
@@ -399,6 +449,14 @@ export default function App() {
                     {entry.error && (
                       <span className="log-tab-badge error" title={entry.error}>!</span>
                     )}
+                    <span
+                      className="log-tab-remove"
+                      role="button"
+                      title="Remove"
+                      onClick={(e) => { e.stopPropagation(); handleRemoveLog(entry.filename); }}
+                    >
+                      &#x2715;
+                    </span>
                     {entry.loading && (
                       <div
                         className="log-tab-progress"
@@ -522,6 +580,8 @@ export default function App() {
                   trimEnd={activeTrimEnd}
                   onTrimChange={handleTrimChange}
                   onTrimReset={handleTrimReset}
+                  onAutoTrim={handleAutoTrim}
+                  hasEnabledField={ENABLED_CANDIDATES.some((c) => log.fields[c.key])}
                 />
               )}
             </>

@@ -298,6 +298,19 @@ body {
 }
 .log-tab-badge.error { background: var(--error); color: #fff; }
 
+.log-tab-remove {
+  flex-shrink: 0;
+  font-size: 11px;
+  line-height: 1;
+  color: transparent;
+  padding: 1px 3px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: color 0.1s, background 0.1s;
+}
+.log-tab:hover .log-tab-remove { color: var(--text-muted); }
+.log-tab-remove:hover { color: var(--error) !important; background: #2a1212; }
+
 .log-tab-progress {
   position: absolute;
   bottom: 0;
@@ -670,6 +683,21 @@ body {
   font-size: 11px;
   color: var(--text-muted);
   opacity: 0.6;
+}
+
+.trim-auto-btn {
+  font-size: 11px;
+  padding: 2px 8px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.trim-auto-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .trim-reset-btn {
