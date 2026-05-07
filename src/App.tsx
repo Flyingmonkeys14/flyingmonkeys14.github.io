@@ -3,12 +3,15 @@ import type { ParsedLog, LogField } from "./types";
 import { parseLogFile } from "./parsers/index";
 import { downloadWPILOG } from "./parsers/wpilogWriter";
 import { buildFieldTree } from "./parsers/logUtils";
+import { scanWPILOGFieldNames } from "./parsers/wpilogExtract";
+import type { WPILOGFieldInfo } from "./parsers/wpilogExtract";
 import { PasswordGate, isAuthenticated } from "./components/PasswordGate";
 import { FieldTree } from "./components/FieldTree";
 import { TimeChart, ValueTable } from "./components/TimeChart";
 import { TimeSlider } from "./components/TimeSlider";
 import { StatsTable } from "./components/StatsTable";
 import { CalculatedFields } from "./components/CalculatedFields";
+import { WPILOGExtractModal } from "./components/WPILOGExtractModal";
 
 type Tab = "chart" | "table" | "stats";
 
@@ -48,7 +51,13 @@ export default function App() {
   const [tab, setTab] = useState<Tab>("chart");
   const [manifestError, setManifestError] = useState<string | null>(null);
   const [showCalc, setShowCalc] = useState(false);
+  const [extractState, setExtractState] = useState<{
+    buffer: ArrayBuffer;
+    filename: string;
+    fields: WPILOGFieldInfo[];
+  } | null>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
+  const extractInputRef = useRef<HTMLInputElement>(null);
 
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -211,6 +220,18 @@ export default function App() {
     downloadWPILOG(log, Array.from(selectedFields));
   }, [log, selectedFields]);
 
+  const handleExtractFileSelected = useCallback(async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const file = files[0];
+    const buffer = await file.arrayBuffer();
+    const fields = scanWPILOGFieldNames(buffer);
+    if (!fields) {
+      alert(`${file.name} is not a valid WPILOG file.`);
+      return;
+    }
+    setExtractState({ buffer, filename: file.name, fields });
+  }, []);
+
   const handleAddCalculatedField = useCallback((field: LogField) => {
     setLogs((prev) =>
       prev.map((entry) => {
@@ -258,6 +279,14 @@ export default function App() {
             </button>
           )}
 
+          <button
+            className="btn-extract"
+            onClick={() => extractInputRef.current?.click()}
+            title="Quickly scan field names from any WPILOG file and export a subset — no full parse required"
+          >
+            &#9660; Extract Fields
+          </button>
+
           {selectedFields.size > 0 && log && (
             <button className="btn-export" onClick={handleExport} title="Save selected fields as a new WPILOG file">
               &darr; Export {selectedFields.size} field{selectedFields.size !== 1 ? "s" : ""} as WPILOG
@@ -279,6 +308,13 @@ export default function App() {
             style={{ display: "none" }}
             onChange={(e) => handleUpload(e.target.files)}
             onClick={(e) => ((e.target as HTMLInputElement).value = "")}
+          />
+          <input
+            ref={extractInputRef}
+            type="file"
+            accept=".wpilog"
+            style={{ display: "none" }}
+            onChange={(e) => { handleExtractFileSelected(e.target.files); (e.target as HTMLInputElement).value = ""; }}
           />
         </div>
       </header>
@@ -454,6 +490,15 @@ export default function App() {
           )}
         </main>
       </div>
+
+      {extractState && (
+        <WPILOGExtractModal
+          buffer={extractState.buffer}
+          filename={extractState.filename}
+          fields={extractState.fields}
+          onClose={() => setExtractState(null)}
+        />
+      )}
     </div>
   );
 }
