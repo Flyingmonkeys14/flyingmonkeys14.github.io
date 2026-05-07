@@ -9,11 +9,13 @@ interface TimeSliderProps {
   trimEnd: number;
   onTrimChange: (start: number, end: number) => void;
   onTrimReset: () => void;
+  onAutoTrim: () => void;
+  hasEnabledField: boolean;
 }
 
 export function TimeSlider({
   startTime, endTime, currentTime, onTimeChange,
-  trimStart, trimEnd, onTrimChange, onTrimReset,
+  trimStart, trimEnd, onTrimChange, onTrimReset, onAutoTrim, hasEnabledField,
 }: TimeSliderProps) {
   const duration = endTime - startTime;
   const trimDuration = trimEnd - trimStart;
@@ -98,6 +100,11 @@ export function TimeSlider({
           <span>s</span>
         </label>
         <span className="trim-total">of {duration.toFixed(1)}s total</span>
+        {hasEnabledField && (
+          <button className="trim-auto-btn" onClick={onAutoTrim} title="Trim to first enable / last disable, like AdvantageScope's Zoom to Enabled">
+            Auto-trim
+          </button>
+        )}
         {hasTrim && (
           <button className="trim-reset-btn" onClick={onTrimReset}>
             Reset trim
