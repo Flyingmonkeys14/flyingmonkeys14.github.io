@@ -1,3 +1,5 @@
+import { useState, useEffect } from "react";
+
 interface TimeSliderProps {
   startTime: number;
   endTime: number;
@@ -21,6 +23,31 @@ export function TimeSlider({
 
   const trimStartSec = trimStart - startTime;
   const trimEndSec = trimEnd - startTime;
+
+  const [startInput, setStartInput] = useState(trimStartSec.toFixed(1));
+  const [endInput, setEndInput] = useState(trimEndSec.toFixed(1));
+
+  // Sync display when external value changes (e.g. reset)
+  useEffect(() => { setStartInput(trimStartSec.toFixed(1)); }, [trimStartSec]);
+  useEffect(() => { setEndInput(trimEndSec.toFixed(1)); }, [trimEndSec]);
+
+  const commitStart = (raw: string) => {
+    const v = parseFloat(raw);
+    if (!isNaN(v) && v >= 0 && v < trimEndSec) {
+      onTrimChange(startTime + v, trimEnd);
+    } else {
+      setStartInput(trimStartSec.toFixed(1));
+    }
+  };
+
+  const commitEnd = (raw: string) => {
+    const v = parseFloat(raw);
+    if (!isNaN(v) && v > trimStartSec && v <= duration) {
+      onTrimChange(trimStart, startTime + v);
+    } else {
+      setEndInput(trimEndSec.toFixed(1));
+    }
+  };
 
   return (
     <div className="time-slider-area">
@@ -46,15 +73,12 @@ export function TimeSlider({
             type="number"
             className="trim-input"
             min={0}
-            max={Math.max(0, trimEndSec - 0.1)}
+            max={trimEndSec - 0.1}
             step={0.1}
-            value={trimStartSec.toFixed(1)}
-            onChange={(e) => {
-              const v = parseFloat(e.target.value);
-              if (!isNaN(v) && v >= 0 && v < trimEndSec) {
-                onTrimChange(startTime + v, trimEnd);
-              }
-            }}
+            value={startInput}
+            onChange={(e) => setStartInput(e.target.value)}
+            onBlur={() => commitStart(startInput)}
+            onKeyDown={(e) => e.key === "Enter" && commitStart(startInput)}
           />
           <span>s</span>
         </label>
@@ -66,13 +90,10 @@ export function TimeSlider({
             min={trimStartSec + 0.1}
             max={duration}
             step={0.1}
-            value={trimEndSec.toFixed(1)}
-            onChange={(e) => {
-              const v = parseFloat(e.target.value);
-              if (!isNaN(v) && v > trimStartSec && v <= duration) {
-                onTrimChange(trimStart, startTime + v);
-              }
-            }}
+            value={endInput}
+            onChange={(e) => setEndInput(e.target.value)}
+            onBlur={() => commitEnd(endInput)}
+            onKeyDown={(e) => e.key === "Enter" && commitEnd(endInput)}
           />
           <span>s</span>
         </label>
