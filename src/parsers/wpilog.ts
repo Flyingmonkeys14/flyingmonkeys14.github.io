@@ -280,20 +280,6 @@ function readRecordHeader(bytes: Uint8Array, pos: number): [RecordHeader | null,
   return [{ entryId, dataSize, timestampUs, dataOffset: pos }, pos + dataSize];
 }
 
-// ── HOOT / embedded WPILOG offset search ────────────────────────────────────
-
-function findWPILOGOffset(bytes: Uint8Array): number {
-  const magic = new TextEncoder().encode(WPILOG_MAGIC); // 6 bytes
-  const scanEnd = Math.min(bytes.length - magic.length, 65536);
-  outer: for (let i = 0; i <= scanEnd; i++) {
-    for (let j = 0; j < magic.length; j++) {
-      if (bytes[i + j] !== magic[j]) continue outer;
-    }
-    return i;
-  }
-  return -1;
-}
-
 // ── Pass 1: collect struct schemas from /.schema/struct:* entries ─────────────
 
 function collectStructSchemas(bytes: Uint8Array, startOffset: number): Map<string, string> {
@@ -344,23 +330,46 @@ export async function parseWPILOG(
   const bytes = new Uint8Array(buffer);
   const view = new DataView(buffer);
 
-  // Locate WPILOG header (may be at offset 0 or embedded after a HOOT prefix)
+  // ── HOOT detection ───────────────────────────────────────────────────────
+  // AdvantageScope identifies HOOT files by reading the compliancy byte at
+  // offset 70 (owletInterface.ts: fs.read(file, buffer, 0, 2, 70, ...)).
+  // Compliancy >= 6 means Phoenix 2024+; < 6 means too old for owlet.
+  // We also fall back to a header-string check for robustness.
+  const isHoot = (() => {
+    if (bytes.length > 70) {
+      const compliancy = bytes[70];
+      // Valid compliancy values are small positive integers (1–20 is a safe range)
+      if (compliancy >= 1 && compliancy <= 20) return true;
+    }
+    const headerStr = new TextDecoder("ascii", { fatal: false }).decode(bytes.subarray(0, 64));
+    return headerStr.includes("roboRIO") || headerStr.includes("CANivore") || headerStr.includes("canivore");
+  })();
+
+  if (isHoot) {
+    const compliancy = bytes.length > 70 ? bytes[70] : 0;
+    if (compliancy > 0 && compliancy < 6) {
+      throw new Error(
+        `${filename} is a CTRE Phoenix .hoot file from an older Phoenix version ` +
+        `(compliancy ${compliancy}, pre-Phoenix 2024). ` +
+        `Hoot logs must be produced by Phoenix 6 (2024 or later) to be converted. ` +
+        `Update your robot code to Phoenix 6 to generate a compatible log.`
+      );
+    }
+    throw new Error(
+      `${filename} is a CTRE Phoenix .hoot file (compliancy ${compliancy}). ` +
+      `This format cannot be decoded directly in a browser. ` +
+      `Convert it to WPILOG using CTRE's owlet CLI tool:\n` +
+      `  owlet "${filename}" output.wpilog -f wpilog\n` +
+      `Download owlet from: https://github.com/CrossTheRoadElec/Phoenix-Releases\n` +
+      `Alternatively, export via Phoenix Tuner X: Devices → Log → Export.`
+    );
+  }
+
+  // Locate WPILOG header (at offset 0 for standard files)
   let startOffset = 0;
   const headerMagic = decodeText(bytes, 0, 6);
   if (headerMagic !== WPILOG_MAGIC) {
-    const headerStr = new TextDecoder("ascii", { fatal: false }).decode(bytes.subarray(0, 32));
-    if (headerStr.includes("roboRIO") || headerStr.includes("CANivore") || headerStr.includes("canivore")) {
-      throw new Error(
-        `${filename} is a CTRE Phoenix .hoot file (proprietary binary format). ` +
-        `To view it here, export it to WPILOG or CSV using Phoenix Tuner X: ` +
-        `Devices → Log → Export.`
-      );
-    }
-    const found = findWPILOGOffset(bytes);
-    if (found === -1) {
-      throw new Error(`${filename} is not a valid WPILOG file (magic bytes not found).`);
-    }
-    startOffset = found;
+    throw new Error(`${filename} is not a valid WPILOG file (magic bytes not found).`);
   }
 
   // Validate version (bytes 6-7 relative to startOffset)
