@@ -36,9 +36,16 @@ const STRING_BAND_COLORS = [
   "#06b6d4", "#84cc16", "#6366f1", "#14b8a6",
 ];
 
-interface TimeChartProps {
+export interface LogSelection {
   log: ParsedLog;
-  selectedFields: Set<string>;
+  fields: Set<string>;
+  trimStart?: number;
+  trimEnd?: number;
+}
+
+interface TimeChartProps {
+  selections: LogSelection[];
+  activeLog: ParsedLog | null;
   currentTime: number;
   onTimeChange: (t: number) => void;
 }
@@ -48,60 +55,90 @@ interface DataPoint {
   y: number;
 }
 
-export function TimeChart({ log, selectedFields, currentTime, onTimeChange }: TimeChartProps) {
+export function TimeChart({ selections, activeLog, currentTime, onTimeChange }: TimeChartProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const chartRef = useRef<Chart | null>(null);
 
-  const { numericFields, stringFields } = useMemo(() => {
-    const numeric: string[] = [];
-    const strings: string[] = [];
-    for (const key of selectedFields) {
-      const f = log.fields[key];
-      if (!f) continue;
-      if (f.type === "Number" || f.type === "Boolean") numeric.push(key);
-      else if (f.type === "String") strings.push(key);
+  const multiLog = useMemo(() => {
+    const filenames = new Set(selections.map((s) => s.log.filename));
+    return filenames.size > 1;
+  }, [selections]);
+
+  const { numericDatasets, stringBandData } = useMemo(() => {
+    const numeric: {
+      label: string;
+      data: DataPoint[];
+      borderColor: string;
+      backgroundColor: string;
+      borderWidth: number;
+      pointRadius: number;
+      pointHoverRadius: number;
+      tension: number;
+      stepped: "before" | false;
+    }[] = [];
+
+    const stringBands: {
+      key: string;
+      color: string;
+      changes: { xMs: number; value: string }[];
+    }[] = [];
+
+    let colorIdx = 0;
+
+    for (const { log, fields, trimStart, trimEnd } of selections) {
+      const tStart = trimStart ?? log.startTime;
+      const tEnd = trimEnd ?? log.endTime;
+
+      for (const key of fields) {
+        const field = log.fields[key];
+        if (!field) continue;
+        const displayKey = key.replace(/^\//, "");
+        const label = multiLog ? `${log.filename}: ${displayKey}` : displayKey;
+
+        if (field.type === "Number" || field.type === "Boolean") {
+          const data: DataPoint[] = field.entries
+            .filter((e) => e.timestamp >= tStart && e.timestamp <= tEnd)
+            .map((e) => ({
+              x: (e.timestamp - log.startTime) * 1000,
+              y: typeof e.value === "boolean" ? (e.value ? 1 : 0) : (e.value as number),
+            }));
+          const color = COLORS[colorIdx % COLORS.length];
+          colorIdx++;
+          numeric.push({
+            label,
+            data,
+            borderColor: color,
+            backgroundColor: color + "22",
+            borderWidth: 1.5,
+            pointRadius: data.length > 500 ? 0 : 2,
+            pointHoverRadius: 4,
+            tension: 0,
+            stepped: field.type === "Boolean" ? "before" : false,
+          });
+        } else if (field.type === "String") {
+          const color = STRING_BAND_COLORS[stringBands.length % STRING_BAND_COLORS.length];
+          const changes: { xMs: number; value: string }[] = [];
+          let lastVal: string | null = null;
+          for (const entry of field.entries) {
+            if (entry.timestamp < tStart || entry.timestamp > tEnd) continue;
+            const v = String(entry.value ?? "");
+            if (v !== lastVal) {
+              changes.push({ xMs: (entry.timestamp - log.startTime) * 1000, value: v });
+              lastVal = v;
+            }
+          }
+          stringBands.push({ key: label, color, changes });
+        }
+      }
     }
-    return { numericFields: numeric, stringFields: strings };
-  }, [selectedFields, log]);
+
+    return { numericDatasets: numeric, stringBandData: stringBands };
+  }, [selections, multiLog]);
 
   useEffect(() => {
     if (!canvasRef.current) return;
     if (chartRef.current) { chartRef.current.destroy(); chartRef.current = null; }
-    if (numericFields.length === 0) return;
-
-    const datasets = numericFields.map((key, i) => {
-      const field = log.fields[key];
-      const data: DataPoint[] = field.entries.map((e) => ({
-        x: (e.timestamp - log.startTime) * 1000,
-        y: typeof e.value === "boolean" ? (e.value ? 1 : 0) : (e.value as number),
-      }));
-      return {
-        label: key.replace(/^\//, ""),
-        data,
-        borderColor: COLORS[i % COLORS.length],
-        backgroundColor: COLORS[i % COLORS.length] + "22",
-        borderWidth: 1.5,
-        pointRadius: data.length > 500 ? 0 : 2,
-        pointHoverRadius: 4,
-        tension: 0,
-        stepped: field.type === "Boolean" ? ("before" as const) : false,
-      };
-    });
-
-    const stringBandData: { key: string; color: string; changes: { xMs: number; value: string }[] }[] = [];
-    stringFields.forEach((key, si) => {
-      const field = log.fields[key];
-      const changes: { xMs: number; value: string }[] = [];
-      let lastVal: string | null = null;
-      for (const entry of field.entries) {
-        const v = String(entry.value ?? "");
-        if (v !== lastVal) {
-          changes.push({ xMs: (entry.timestamp - log.startTime) * 1000, value: v });
-          lastVal = v;
-        }
-      }
-      stringBandData.push({ key, color: STRING_BAND_COLORS[si % STRING_BAND_COLORS.length], changes });
-    });
+    if (numericDatasets.length === 0) return;
 
     const BAND_H = 18;
     const BANDS_TOTAL = stringBandData.length * BAND_H;
@@ -109,7 +146,7 @@ export function TimeChart({ log, selectedFields, currentTime, onTimeChange }: Ti
 
     chartRef.current = new Chart(canvasRef.current, {
       type: "line",
-      data: { datasets },
+      data: { datasets: numericDatasets },
       options: {
         animation: false,
         responsive: true,
@@ -130,8 +167,11 @@ export function TimeChart({ log, selectedFields, currentTime, onTimeChange }: Ti
         scales: {
           x: {
             type: "linear",
-            title: { display: true, text: "Time (ms from start)", color: "#94a3b8" },
-            ticks: { color: "#94a3b8" },
+            title: { display: true, text: "Time (s from log start)", color: "#94a3b8" },
+            ticks: {
+              color: "#94a3b8",
+              callback: (v) => `${(Number(v) / 1000).toFixed(1)}s`,
+            },
             grid: { color: "#1e293b" },
           },
           y: { ticks: { color: "#94a3b8" }, grid: { color: "#1e293b" } },
@@ -141,10 +181,11 @@ export function TimeChart({ log, selectedFields, currentTime, onTimeChange }: Ti
         {
           id: "timeCursor",
           afterDraw(chart) {
+            if (!activeLog) return;
             const xScale = chart.scales["x"];
             const yScale = chart.scales["y"];
             if (!xScale || !yScale) return;
-            const xMs = (currentTime - log.startTime) * 1000;
+            const xMs = (currentTime - activeLog.startTime) * 1000;
             const xPx = xScale.getPixelForValue(xMs);
             if (xPx < xScale.left || xPx > xScale.right) return;
             const ctx = chart.ctx;
@@ -170,6 +211,8 @@ export function TimeChart({ log, selectedFields, currentTime, onTimeChange }: Ti
             const xLeft = xScale.left;
             const xRight = xScale.right;
             const xMax = xScale.max;
+            const BAND_H = 18;
+            const BANDS_TOTAL = stringBandData.length * BAND_H;
 
             ctx.save();
             stringBandData.forEach((band, bi) => {
@@ -187,8 +230,7 @@ export function TimeChart({ log, selectedFields, currentTime, onTimeChange }: Ti
                 const px1 = Math.max(xLeft, xScale.getPixelForValue(segStart));
                 const px2 = Math.min(xRight, xScale.getPixelForValue(segEnd));
                 if (px2 <= px1) continue;
-                const bgColor = valueColors.get(band.changes[ci].value) ?? "#333";
-                ctx.fillStyle = bgColor;
+                ctx.fillStyle = valueColors.get(band.changes[ci].value) ?? "#333";
                 ctx.fillRect(px1, bandTop, px2 - px1, bandBottom - bandTop);
                 const segWidth = px2 - px1;
                 if (segWidth > 30) {
@@ -209,7 +251,7 @@ export function TimeChart({ log, selectedFields, currentTime, onTimeChange }: Ti
               ctx.fillStyle = band.color;
               ctx.font = "bold 9px sans-serif";
               ctx.textBaseline = "middle";
-              ctx.fillText(band.key.replace(/^\//, "").slice(-20), xLeft + 2, (bandTop + bandBottom) / 2);
+              ctx.fillText(band.key.slice(-24), xLeft + 2, (bandTop + bandBottom) / 2);
               ctx.strokeStyle = band.color;
               ctx.lineWidth = 1;
               ctx.setLineDash([]);
@@ -226,6 +268,7 @@ export function TimeChart({ log, selectedFields, currentTime, onTimeChange }: Ti
 
     const canvas = canvasRef.current;
     const handleClick = (e: MouseEvent) => {
+      if (!activeLog) return;
       const chart = chartRef.current;
       if (!chart) return;
       const xScale = chart.scales["x"];
@@ -233,34 +276,46 @@ export function TimeChart({ log, selectedFields, currentTime, onTimeChange }: Ti
       const rect = canvas.getBoundingClientRect();
       const xPx = e.clientX - rect.left;
       const xMs = xScale.getValueForPixel(xPx);
-      if (xMs !== undefined) onTimeChange(log.startTime + xMs / 1000);
+      if (xMs !== undefined) onTimeChange(activeLog.startTime + xMs / 1000);
     };
     canvas.addEventListener("click", handleClick);
     return () => canvas.removeEventListener("click", handleClick);
-  }, [numericFields, stringFields, log]);
+  }, [numericDatasets, stringBandData, activeLog]);
 
   useEffect(() => { chartRef.current?.update("none"); }, [currentTime]);
 
-  const hasNoPlottable = numericFields.length === 0;
-  const hasStringOnly = hasNoPlottable && stringFields.length > 0;
+  const totalFields = selections.reduce((n, s) => n + s.fields.size, 0);
+  const hasStringOnly = numericDatasets.length === 0 && stringBandData.length > 0;
 
-  if (hasNoPlottable && selectedFields.size > 0 && !hasStringOnly) {
-    return <div className="chart-empty">Selected fields are not numeric. Try selecting Number, Boolean, or String fields.</div>;
-  }
-  if (numericFields.length === 0 && stringFields.length === 0) {
+  if (numericDatasets.length === 0 && stringBandData.length === 0) {
+    if (totalFields > 0) {
+      return <div className="chart-empty">Selected fields are not plottable. Select Number, Boolean, or String fields.</div>;
+    }
     return <div className="chart-empty">Select fields from the sidebar to plot them here.</div>;
   }
-  if (hasStringOnly) {
-    return <StringTimeline log={log} stringFields={stringFields} currentTime={currentTime} onTimeChange={onTimeChange} />;
+
+  if (hasStringOnly && activeLog) {
+    const activeSel = selections.find((s) => s.log === activeLog);
+    const stringFields = activeSel
+      ? Array.from(activeSel.fields).filter((k) => activeLog.fields[k]?.type === "String")
+      : [];
+    return <StringTimeline log={activeLog} stringFields={stringFields} trimStart={activeSel?.trimStart} trimEnd={activeSel?.trimEnd} currentTime={currentTime} onTimeChange={onTimeChange} />;
   }
 
   return <div className="chart-container"><canvas ref={canvasRef} /></div>;
 }
 
-function StringTimeline({ log, stringFields, currentTime, onTimeChange }: {
-  log: ParsedLog; stringFields: string[]; currentTime: number; onTimeChange: (t: number) => void;
+function StringTimeline({ log, stringFields, trimStart, trimEnd, currentTime, onTimeChange }: {
+  log: ParsedLog;
+  stringFields: string[];
+  trimStart?: number;
+  trimEnd?: number;
+  currentTime: number;
+  onTimeChange: (t: number) => void;
 }) {
-  const totalMs = (log.endTime - log.startTime) * 1000;
+  const tStart = trimStart ?? log.startTime;
+  const tEnd = trimEnd ?? log.endTime;
+  const totalMs = (tEnd - tStart) * 1000;
   return (
     <div className="string-timeline">
       {stringFields.map((key, si) => {
@@ -268,18 +323,19 @@ function StringTimeline({ log, stringFields, currentTime, onTimeChange }: {
         const changes: { xMs: number; value: string }[] = [];
         let lastVal: string | null = null;
         for (const entry of field.entries) {
+          if (entry.timestamp < tStart || entry.timestamp > tEnd) continue;
           const v = String(entry.value ?? "");
-          if (v !== lastVal) { changes.push({ xMs: (entry.timestamp - log.startTime) * 1000, value: v }); lastVal = v; }
+          if (v !== lastVal) { changes.push({ xMs: (entry.timestamp - tStart) * 1000, value: v }); lastVal = v; }
         }
         const color = STRING_BAND_COLORS[si % STRING_BAND_COLORS.length];
-        const curMs = (currentTime - log.startTime) * 1000;
+        const curMs = (currentTime - tStart) * 1000;
         return (
           <div key={key} className="string-lane">
             <div className="string-lane-label" style={{ color }}>{key.replace(/^\//, "")}</div>
             <div className="string-lane-track" onClick={(e) => {
               const rect = e.currentTarget.getBoundingClientRect();
               const frac = (e.clientX - rect.left) / rect.width;
-              onTimeChange(log.startTime + frac * (log.endTime - log.startTime));
+              onTimeChange(tStart + frac * (tEnd - tStart));
             }}>
               {changes.map((c, ci) => {
                 const startPct = (c.xMs / totalMs) * 100;

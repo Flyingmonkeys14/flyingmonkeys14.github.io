@@ -1,5 +1,5 @@
-import { useState } from "react";
-import type { LogFieldTree } from "../types";
+import { useState, useMemo } from "react";
+import type { LogFieldTree, LoggableType } from "../types";
 
 interface FieldTreeProps {
   tree: LogFieldTree;
@@ -92,13 +92,40 @@ function TreeNode({ name, node, selectedFields, onToggleField, depth }: NodeProp
   );
 }
 
+interface FlatField {
+  fullKey: string;
+  type: LoggableType | undefined;
+}
+
+function flattenFields(node: LogFieldTree): FlatField[] {
+  const result: FlatField[] = [];
+  if (node.fullKey && node.type && node.type !== "Empty") {
+    result.push({ fullKey: node.fullKey, type: node.type });
+  }
+  for (const child of Object.values(node.children)) {
+    result.push(...flattenFields(child));
+  }
+  return result;
+}
+
 export function FieldTree({ tree, selectedFields, onToggleField }: FieldTreeProps) {
   const [search, setSearch] = useState("");
 
-  const entries = Object.entries(tree.children).sort(([a], [b]) => a.localeCompare(b));
-  const filtered = search
-    ? entries.filter(([name]) => name.toLowerCase().includes(search.toLowerCase()))
-    : entries;
+  const allFlat = useMemo(
+    () => flattenFields(tree).sort((a, b) => a.fullKey.localeCompare(b.fullKey)),
+    [tree]
+  );
+
+  const flatFiltered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return null;
+    return allFlat.filter((f) => f.fullKey.toLowerCase().includes(q));
+  }, [allFlat, search]);
+
+  const treeEntries = useMemo(
+    () => Object.entries(tree.children).sort(([a], [b]) => a.localeCompare(b)),
+    [tree]
+  );
 
   return (
     <div className="field-tree">
@@ -115,18 +142,52 @@ export function FieldTree({ tree, selectedFields, onToggleField }: FieldTreeProp
         onChange={(e) => setSearch(e.target.value)}
       />
       <div className="tree-scroll">
-        {filtered.map(([name, node]) => (
-          <TreeNode
-            key={name}
-            name={name}
-            node={node}
-            selectedFields={selectedFields}
-            onToggleField={onToggleField}
-            depth={0}
-          />
-        ))}
-        {filtered.length === 0 && (
-          <div className="empty-state">No fields match "{search}"</div>
+        {flatFiltered ? (
+          <>
+            {flatFiltered.map((f) => {
+              const canSelect = f.type && f.type !== "Raw";
+              const isSelected = selectedFields.has(f.fullKey);
+              return (
+                <div
+                  key={f.fullKey}
+                  className={`tree-node ${isSelected ? "selected" : ""} ${canSelect ? "selectable" : ""}`}
+                  onClick={() => canSelect && onToggleField(f.fullKey)}
+                  title={f.fullKey}
+                >
+                  <span className="tree-arrow" style={{ opacity: 0 }}>▸</span>
+                  <span className="tree-name">{f.fullKey.replace(/^\//, "")}</span>
+                  {f.type && f.type !== "Empty" && (
+                    <span
+                      className="type-badge"
+                      style={{ background: TYPE_COLORS[f.type] ?? "#6b7280" }}
+                      title={f.type}
+                    >
+                      {TYPE_ABBR[f.type] ?? f.type}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+            {flatFiltered.length === 0 && (
+              <div className="empty-state">No fields match "{search}"</div>
+            )}
+          </>
+        ) : (
+          <>
+            {treeEntries.map(([name, node]) => (
+              <TreeNode
+                key={name}
+                name={name}
+                node={node}
+                selectedFields={selectedFields}
+                onToggleField={onToggleField}
+                depth={0}
+              />
+            ))}
+            {treeEntries.length === 0 && (
+              <div className="empty-state">No fields available</div>
+            )}
+          </>
         )}
       </div>
     </div>

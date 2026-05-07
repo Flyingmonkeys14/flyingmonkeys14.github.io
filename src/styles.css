@@ -618,14 +618,73 @@ body {
 .field-value { font-family: monospace; word-break: break-all; }
 
 /* ===== Time Slider ===== */
+.time-slider-area {
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+
 .time-slider {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 16px;
-  border-top: 1px solid var(--border);
-  background: var(--surface);
-  flex-shrink: 0;
+  padding: 8px 16px 4px;
+}
+
+.trim-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 16px 6px;
+  flex-wrap: wrap;
+}
+
+.trim-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.trim-field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.trim-input {
+  width: 64px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 11px;
+  padding: 2px 5px;
+  outline: none;
+  text-align: right;
+}
+.trim-input:focus { border-color: var(--accent); }
+
+.trim-total {
+  font-size: 11px;
+  color: var(--text-muted);
+  opacity: 0.6;
+}
+
+.trim-reset-btn {
+  font-size: 11px;
+  padding: 2px 8px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.trim-reset-btn:hover {
+  border-color: var(--warning);
+  color: var(--warning);
 }
 
 .time-label {
