@@ -259,13 +259,96 @@ export function encodeWPILOG(log: ParsedLog, selectedKeys: string[]): ArrayBuffe
   return buf.toUint8Array().buffer as ArrayBuffer;
 }
 
+export async function encodeWPILOGAsync(
+  log: ParsedLog,
+  selectedKeys: string[],
+  onProgress: (fraction: number) => void,
+): Promise<ArrayBuffer> {
+  const buf = new DynamicBuffer();
+
+  const header = new Uint8Array(13);
+  const hv = new DataView(header.buffer);
+  header.set(encStr(MAGIC));
+  hv.setUint16(7, VERSION, true);
+  hv.setUint32(9, 0, true);
+  buf.append(header);
+
+  const fieldKeys = selectedKeys.filter((k) => log.fields[k]);
+  const idMap = new Map<string, number>();
+  fieldKeys.forEach((key, i) => idMap.set(key, i + 1));
+
+  let originSec = Infinity;
+  for (const key of fieldKeys) {
+    const f = log.fields[key];
+    if (f.entries.length > 0) originSec = Math.min(originSec, f.entries[0].timestamp);
+  }
+  if (!isFinite(originSec)) originSec = 0;
+
+  for (const key of fieldKeys) {
+    const field = log.fields[key];
+    const entryId = idMap.get(key)!;
+    const norm = normalizeTypeStr(field.typeStr, field.type);
+    writeRecord(buf, 0, 0, buildStartRecord(entryId, key, norm, field.metadata ?? ""));
+  }
+
+  type DataEvent = { timestampUs: number; entryId: number; data: Uint8Array };
+  const events: DataEvent[] = [];
+
+  let totalEntries = 0;
+  for (const key of fieldKeys) totalEntries += log.fields[key].entries.length;
+
+  let processed = 0;
+  let lastYield = Date.now();
+
+  for (const key of fieldKeys) {
+    const field = log.fields[key];
+    const entryId = idMap.get(key)!;
+    const norm = normalizeTypeStr(field.typeStr, field.type);
+    for (const entry of field.entries) {
+      const data = encodeValue(norm, entry.value);
+      processed++;
+      if (!data) continue;
+      const timestampUs = Math.round((entry.timestamp - originSec) * 1_000_000);
+      events.push({ timestampUs, entryId, data });
+      if (Date.now() - lastYield > 40) {
+        onProgress(totalEntries > 0 ? (processed / totalEntries) * 0.8 : 0.5);
+        await new Promise<void>((r) => setTimeout(r, 0));
+        lastYield = Date.now();
+      }
+    }
+  }
+
+  onProgress(0.85);
+  await new Promise<void>((r) => setTimeout(r, 0));
+
+  events.sort((a, b) => a.timestampUs - b.timestampUs);
+  for (const ev of events) writeRecord(buf, ev.entryId, ev.timestampUs, ev.data);
+
+  onProgress(1.0);
+  return buf.toUint8Array().buffer as ArrayBuffer;
+}
+
 export function downloadWPILOG(log: ParsedLog, selectedKeys: string[], outputName?: string) {
   const buffer = encodeWPILOG(log, selectedKeys);
+  triggerDownload(buffer, outputName ?? deriveOutputName(log.filename, selectedKeys));
+}
+
+export async function downloadWPILOGAsync(
+  log: ParsedLog,
+  selectedKeys: string[],
+  onProgress: (fraction: number) => void,
+  outputName?: string,
+): Promise<void> {
+  const buffer = await encodeWPILOGAsync(log, selectedKeys, onProgress);
+  triggerDownload(buffer, outputName ?? deriveOutputName(log.filename, selectedKeys));
+}
+
+function triggerDownload(buffer: ArrayBuffer, filename: string) {
   const blob = new Blob([buffer], { type: "application/octet-stream" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = outputName ?? deriveOutputName(log.filename, selectedKeys);
+  a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
 }

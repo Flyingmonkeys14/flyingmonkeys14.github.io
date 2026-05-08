@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import type { ParsedLog } from "../types";
-import { downloadWPILOG } from "../parsers/wpilogWriter";
+import { downloadWPILOGAsync } from "../parsers/wpilogWriter";
 
 interface ExportModalProps {
   logs: ParsedLog[];
@@ -36,6 +36,7 @@ export function ExportModal({ logs, onClose }: ExportModalProps) {
   // Map<logFilename, Set<fieldKey>>
   const [checked, setChecked] = useState<Map<string, Set<string>>>(() => new Map());
   const [exporting, setExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState(0);
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { searchRef.current?.focus(); }, []);
@@ -108,16 +109,28 @@ export function ExportModal({ logs, onClose }: ExportModalProps) {
   const handleExport = useCallback(async () => {
     if (totalChecked === 0 || exporting) return;
     setExporting(true);
+    setExportProgress(0);
     await new Promise<void>((r) => setTimeout(r, 0));
     try {
-      for (const log of logs) {
-        const selectedKeys = checked.get(log.filename);
-        if (!selectedKeys || selectedKeys.size === 0) continue;
-        downloadWPILOG(log, Array.from(selectedKeys));
+      const logsToExport = logs.filter((log) => {
+        const keys = checked.get(log.filename);
+        return keys && keys.size > 0;
+      });
+      const total = logsToExport.length;
+      for (let i = 0; i < logsToExport.length; i++) {
+        const log = logsToExport[i];
+        const selectedKeys = Array.from(checked.get(log.filename)!);
+        await downloadWPILOGAsync(
+          log,
+          selectedKeys,
+          (fraction) => setExportProgress(Math.round(((i + fraction) / total) * 100)),
+        );
+        setExportProgress(Math.round(((i + 1) / total) * 100));
       }
       onClose();
     } finally {
       setExporting(false);
+      setExportProgress(0);
     }
   }, [logs, checked, totalChecked, exporting, onClose]);
 
@@ -212,19 +225,26 @@ export function ExportModal({ logs, onClose }: ExportModalProps) {
           })}
         </div>
 
+        {exporting && (
+          <div className="export-progress-wrap">
+            <div className="export-progress-bar" style={{ width: `${exportProgress}%` }} />
+            <span className="export-progress-label">{exportProgress}%</span>
+          </div>
+        )}
+
         <div className="extract-footer">
           <span className="extract-count">
             {totalChecked === 0
               ? "No fields selected"
               : `${totalChecked} field${totalChecked !== 1 ? "s" : ""} selected`}
           </span>
-          <button className="extract-cancel-btn" onClick={onClose}>Cancel</button>
+          <button className="extract-cancel-btn" onClick={onClose} disabled={exporting}>Cancel</button>
           <button
             className="extract-export-btn"
             onClick={handleExport}
             disabled={totalChecked === 0 || exporting}
           >
-            {exporting ? "Exporting…" : "Export & Download"}
+            {exporting ? `Exporting… ${exportProgress}%` : "Export & Download"}
           </button>
         </div>
       </div>
