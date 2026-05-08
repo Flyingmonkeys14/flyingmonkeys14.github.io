@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import type { ParsedLog, LogField } from "./types";
 import { parseLogFile } from "./parsers/index";
-import { downloadWPILOG } from "./parsers/wpilogWriter";
 import { buildFieldTree } from "./parsers/logUtils";
 import { scanWPILOGFieldNames } from "./parsers/wpilogExtract";
 import { PasswordGate, isAuthenticated } from "./components/PasswordGate";
@@ -13,6 +12,7 @@ import { StatsTable } from "./components/StatsTable";
 import { CalculatedFields } from "./components/CalculatedFields";
 import { WPILOGExtractModal } from "./components/WPILOGExtractModal";
 import type { ExtractSourceInfo } from "./components/WPILOGExtractModal";
+import { ExportModal } from "./components/ExportModal";
 
 type Tab = "chart" | "table" | "stats";
 
@@ -87,6 +87,7 @@ export default function App() {
   const [tab, setTab] = useState<Tab>("chart");
   const [manifestError, setManifestError] = useState<string | null>(null);
   const [showCalc, setShowCalc] = useState(false);
+  const [showExport, setShowExport] = useState(false);
   const [extractState, setExtractState] = useState<{ sources: ExtractSourceInfo[] } | null>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const extractInputRef = useRef<HTMLInputElement>(null);
@@ -313,10 +314,7 @@ export default function App() {
     }
   }, [activeLog, logs]);
 
-  const handleExport = useCallback(() => {
-    if (!log || activeSelectedFields.size === 0) return;
-    downloadWPILOG(log, Array.from(activeSelectedFields));
-  }, [log, activeSelectedFields]);
+  const parsedLogs = useMemo(() => logs.flatMap((e) => e.log ? [e.log] : []), [logs]);
 
   const handleExtractFileSelected = useCallback(async (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -388,9 +386,9 @@ export default function App() {
             &#9660; Extract Fields
           </button>
 
-          {activeSelectedFields.size > 0 && log && (
-            <button className="btn-export" onClick={handleExport} title="Save selected fields as a new WPILOG file">
-              &darr; Export {activeSelectedFields.size} field{activeSelectedFields.size !== 1 ? "s" : ""} as WPILOG
+          {parsedLogs.length > 0 && (
+            <button className="btn-export" onClick={() => setShowExport(true)} title="Export fields from loaded logs as WPILOG">
+              &darr; Export WPILOG&hellip;
             </button>
           )}
 
@@ -611,6 +609,12 @@ export default function App() {
         <WPILOGExtractModal
           sources={extractState.sources}
           onClose={() => setExtractState(null)}
+        />
+      )}
+      {showExport && (
+        <ExportModal
+          logs={parsedLogs}
+          onClose={() => setShowExport(false)}
         />
       )}
     </div>
