@@ -1295,6 +1295,28 @@ body {
   padding: 24px;
 }
 
+.export-progress-wrap {
+  position: relative;
+  height: 6px;
+  background: var(--surface2);
+  flex-shrink: 0;
+}
+
+.export-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #2563eb, #60a5fa);
+  transition: width 0.15s linear;
+}
+
+.export-progress-label {
+  position: absolute;
+  right: 8px;
+  top: -14px;
+  font-size: 10px;
+  font-family: monospace;
+  color: var(--text-muted);
+}
+
 .extract-footer {
   display: flex;
   align-items: center;
@@ -1321,7 +1343,8 @@ body {
   font-size: 12px;
   transition: background 0.15s;
 }
-.extract-cancel-btn:hover { background: var(--border); color: var(--text); }
+.extract-cancel-btn:hover:not(:disabled) { background: var(--border); color: var(--text); }
+.extract-cancel-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .extract-export-btn {
   padding: 7px 16px;
