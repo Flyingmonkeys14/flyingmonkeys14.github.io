@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import type { ParsedLog, LogField } from "../types";
 
 interface CalculatedFieldsProps {
@@ -6,7 +6,7 @@ interface CalculatedFieldsProps {
   onAddField: (field: LogField) => void;
 }
 
-// ── safe expression evaluator ─────────────────────────────────────────────────
+// ── safe expression evaluator ────────────────────────────────────────────────
 // Replaces field references {/some/field} with the value at each timestamp,
 // then evaluates simple arithmetic + a few math functions.
 // Uses a whitelist-only approach: no eval(), no Function().
@@ -176,20 +176,55 @@ function fieldKeyToIdent(key: string): string {
   return key.replace(/^\//, "").replace(/[^a-zA-Z0-9]/g, "_");
 }
 
+const OPERATOR_BUTTONS = [
+  { label: "+",      insert: " + " },
+  { label: "−",      insert: " - " },
+  { label: "×",      insert: " * " },
+  { label: "÷",      insert: " / " },
+  { label: "%",      insert: " % " },
+  { label: "^",      insert: " ^ " },
+  { label: "(",      insert: "("   },
+  { label: ")",      insert: ")"   },
+];
+
+const FUNCTION_BUTTONS = [
+  "abs", "sqrt", "log", "log10", "sin", "cos", "tan",
+  "ceil", "floor", "round", "sign", "exp",
+];
+
 export function CalculatedFields({ log, onAddField }: CalculatedFieldsProps) {
   const [name, setName] = useState("");
   const [expr, setExpr] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
+  const exprRef = useRef<HTMLInputElement>(null);
 
   const numericFields = Object.values(log.fields).filter(
     (f) => f.type === "Number" || f.type === "Boolean"
   );
 
-  const insertIdent = useCallback((key: string) => {
-    setExpr((prev) => prev + fieldKeyToIdent(key));
+  const insertAtCursor = useCallback((text: string) => {
+    const input = exprRef.current;
+    setError(null);
+    setPreview(null);
+    if (!input) {
+      setExpr((prev) => prev + text);
+      return;
+    }
+    const start = input.selectionStart ?? input.value.length;
+    const end = input.selectionEnd ?? input.value.length;
+    const newExpr = input.value.slice(0, start) + text + input.value.slice(end);
+    setExpr(newExpr);
+    requestAnimationFrame(() => {
+      input.focus();
+      input.setSelectionRange(start + text.length, start + text.length);
+    });
   }, []);
+
+  const insertIdent = useCallback((key: string) => {
+    insertAtCursor(fieldKeyToIdent(key) + " ");
+  }, [insertAtCursor]);
 
   const handlePreview = useCallback(() => {
     setError(null);
@@ -309,15 +344,25 @@ export function CalculatedFields({ log, onAddField }: CalculatedFieldsProps) {
 
         <label className="calc-label">Expression</label>
         <input
+          ref={exprRef}
           className="calc-input calc-expr"
           placeholder="e.g. Field_A * Field_B + 2.5"
           value={expr}
           onChange={(e) => { setExpr(e.target.value); setError(null); setPreview(null); }}
         />
 
-        <div className="calc-hint">
-          Operators: + &minus; &times; / % ^(power) &nbsp;|&nbsp;
-          Functions: abs sqrt log sin cos tan ceil floor round sign exp
+        <div className="calc-op-row">
+          {OPERATOR_BUTTONS.map((op) => (
+            <button key={op.label} className="calc-op-btn" onClick={() => insertAtCursor(op.insert)}>
+              {op.label}
+            </button>
+          ))}
+          <span className="calc-op-sep" />
+          {FUNCTION_BUTTONS.map((fn) => (
+            <button key={fn} className="calc-fn-btn" onClick={() => insertAtCursor(fn + "(")}>
+              {fn}
+            </button>
+          ))}
         </div>
 
         <div className="calc-buttons">
