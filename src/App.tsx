@@ -13,6 +13,7 @@ import { CalculatedFields } from "./components/CalculatedFields";
 import { WPILOGExtractModal } from "./components/WPILOGExtractModal";
 import type { ExtractSourceInfo } from "./components/WPILOGExtractModal";
 import { ExportModal } from "./components/ExportModal";
+import { PowerAnalysisButton } from "./components/PowerAnalysis";
 
 type Tab = "chart" | "table" | "stats";
 
@@ -392,6 +393,10 @@ export default function App() {
             </button>
           )}
 
+          {parsedLogs.length > 0 && (
+            <PowerAnalysisButton logs={parsedLogs} />
+          )}
+
           <button
             className="btn-upload"
             onClick={() => uploadInputRef.current?.click()}
@@ -564,7 +569,12 @@ export default function App() {
                     currentTime={currentTime}
                   />
                 ) : (
-                  <StatsTable log={log} selectedFields={activeSelectedFields} />
+                  <StatsTable
+                    log={log}
+                    selectedFields={activeSelectedFields}
+                    trimStart={activeTrimStart}
+                    trimEnd={activeTrimEnd}
+                  />
                 )}
               </div>
 

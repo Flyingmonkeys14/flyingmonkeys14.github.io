@@ -3,6 +3,8 @@ import type { ParsedLog } from "../types";
 interface StatsTableProps {
   log: ParsedLog;
   selectedFields: Set<string>;
+  trimStart?: number;
+  trimEnd?: number;
 }
 
 interface FieldStats {
@@ -73,7 +75,7 @@ function fmt(v: number | null, digits = 6): string {
   return parseFloat(n.toPrecision(digits)).toString();
 }
 
-export function StatsTable({ log, selectedFields }: StatsTableProps) {
+export function StatsTable({ log, selectedFields, trimStart, trimEnd }: StatsTableProps) {
   if (selectedFields.size === 0) {
     return (
       <div className="stats-empty">
@@ -87,6 +89,11 @@ export function StatsTable({ log, selectedFields }: StatsTableProps) {
     const field = log.fields[key];
     if (!field || (field.type !== "Number" && field.type !== "Boolean")) continue;
     const values = field.entries
+      .filter((e) => {
+        if (trimStart !== undefined && e.timestamp < trimStart) return false;
+        if (trimEnd !== undefined && e.timestamp > trimEnd) return false;
+        return true;
+      })
       .map((e) => (typeof e.value === "boolean" ? (e.value ? 1 : 0) : (e.value as number)))
       .filter((v) => isFinite(v));
     const stats = computeStats(values);
