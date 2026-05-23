@@ -145,6 +145,41 @@ body {
 }
 .btn-export:hover { background: #166534; }
 
+/* ===== Power Analysis button ===== */
+.power-analysis-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.btn-power {
+  background: #451a03;
+  border: 1px solid #92400e;
+  color: #fbbf24;
+  padding: 5px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+  font-weight: 600;
+  transition: background 0.15s;
+  display: block;
+  width: 100%;
+}
+.btn-power:hover:not(:disabled) { background: #78350f; }
+.btn-power:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-power.running { background: #78350f; }
+
+.power-progress-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: linear-gradient(90deg, #f59e0b, #fbbf24);
+  border-radius: 0 1px 1px 0;
+  transition: width 0.15s linear;
+  pointer-events: none;
+}
+
 /* ===== App Layout ===== */
 .app {
   display: flex;
